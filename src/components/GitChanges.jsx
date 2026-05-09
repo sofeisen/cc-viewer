@@ -296,6 +296,9 @@ export default function GitChanges({ style, onClose, onFileClick, onOpenFile, re
               ))}
             </>
           );
+          const unpushedSeparator = showUnpushed && (
+            <div className={styles.unpushedSeparator} aria-hidden="true" />
+          );
           const unpushedHeader = showUnpushed && (
             <div
               className={styles.unpushedHeader}
@@ -340,9 +343,10 @@ export default function GitChanges({ style, onClose, onFileClick, onOpenFile, re
           );
           return isSingleRepo ? (
             <React.Fragment key={repo.path}>
+              {workingTreeTree}
+              {unpushedSeparator}
               {unpushedHeader}
               {unpushedNode}
-              {workingTreeTree}
             </React.Fragment>
           ) : (
             <React.Fragment key={repo.path}>
@@ -374,9 +378,10 @@ export default function GitChanges({ style, onClose, onFileClick, onOpenFile, re
               </div>
               {!collapsed && (
                 <>
+                  {workingTreeTree}
+                  {unpushedSeparator}
                   {unpushedHeader}
                   {unpushedNode}
-                  {workingTreeTree}
                 </>
               )}
             </React.Fragment>

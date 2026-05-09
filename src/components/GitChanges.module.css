@@ -240,6 +240,12 @@
 }
 
 /* ─── 本地未推送 commit 区 ─── */
+.unpushedSeparator {
+  margin: 6px 8px;
+  border-top: 1px dashed var(--border-primary);
+  opacity: 0.7;
+}
+
 .unpushedHeader {
   display: flex;
   align-items: center;
