@@ -2044,11 +2044,12 @@ class ChatView extends React.Component {
       this.setState({ inputEmpty: false });
       textarea.focus();
     } else if (this._inputWs && this._inputWs.readyState === WebSocket.OPEN) {
-      // 终端模式下没有 textarea，直接通过 PTY 发送
+      // 终端模式下没有 textarea，直接通过 PTY 发送。
+      // 用 bracket-paste 包裹避免 description 含 `/` `!` `\t` 等被 Ink TUI 当特殊键解析。
       this._inputWs.send(JSON.stringify({
         type: 'input-sequential',
-        chunks: [description, '\r'],
-        settleMs: 50,
+        chunks: buildBracketPasteSubmitChunks(description),
+        settleMs: BRACKET_PASTE_SUBMIT_SETTLE_MS,
       }));
     }
   };
@@ -2071,6 +2072,28 @@ class ChatView extends React.Component {
     }
     if (!assembled) return;
 
+    // WS 断开时不直接丢消息：把 assembled 写回 textarea 作草稿，让用户能手动重试。
+    // 不设 pendingInput（没真发出去，不该显示 optimistic bubble）。
+    const wsOpen = this._inputWs && this._inputWs.readyState === WebSocket.OPEN;
+    if (!wsOpen) {
+      const ta = this._inputRef.current;
+      if (ta) {
+        ta.value = assembled;
+        ta.style.height = 'auto';
+        ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+      }
+      this.setState({
+        ultraplanModalOpen: false,
+        ultraplanPrompt: '',
+        ultraplanVariant: 'codeExpert',
+        ultraplanFiles: [],
+        inputEmpty: ta ? !assembled : true,
+      }, () => {
+        if (ta) ta.focus();
+      });
+      return;
+    }
+
     this.setState({
       ultraplanModalOpen: false,
       ultraplanPrompt: '',
@@ -2079,16 +2102,14 @@ class ChatView extends React.Component {
       pendingInput: userInput,
       inputSuggestion: null,
     }, () => {
-      if (this._inputWs && this._inputWs.readyState === WebSocket.OPEN) {
-        if (this.props.sdkMode) {
-          this._inputWs.send(JSON.stringify({ type: 'sdk-user-message', text: assembled }));
-        } else {
-          this._inputWs.send(JSON.stringify({
-            type: 'input-sequential',
-            chunks: buildBracketPasteSubmitChunks(assembled),
-            settleMs: BRACKET_PASTE_SUBMIT_SETTLE_MS,
-          }));
-        }
+      if (this.props.sdkMode) {
+        this._inputWs.send(JSON.stringify({ type: 'sdk-user-message', text: assembled }));
+      } else {
+        this._inputWs.send(JSON.stringify({
+          type: 'input-sequential',
+          chunks: buildBracketPasteSubmitChunks(assembled),
+          settleMs: BRACKET_PASTE_SUBMIT_SETTLE_MS,
+        }));
       }
       this.scrollToBottom();
     });
