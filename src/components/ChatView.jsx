@@ -14,7 +14,7 @@ import { getTeammateAvatar } from '../utils/teammateAvatars';
 import { isSystemText, classifyUserContent, isMainAgent, isTeammate, resolveTeammateNames } from '../utils/contentFilter';
 import { classifyRequest, formatRequestTag, formatTeammateLabel } from '../utils/requestType';
 import { playEvent as playVoiceEvent } from '../utils/voicePackPlayer';
-import { buildChunksForAnswer } from '../utils/ptyChunkBuilder';
+import { buildChunksForAnswer, buildBracketPasteSubmitChunks, BRACKET_PASTE_SUBMIT_SETTLE_MS } from '../utils/ptyChunkBuilder';
 import { isPlanApprovalPrompt, isDangerousOperationPrompt, parseToolInfoFromBuffer } from '../utils/promptClassifier';
 import { isImageFile, isMutatingCommand } from '../utils/commandValidator';
 import { loadExpandedPaths, saveExpandedPaths } from '../utils/fileExpandedPathsStorage';
@@ -2056,12 +2056,21 @@ class ChatView extends React.Component {
   handlePresetSend = (description) => {
     if (!description) return;
     const textarea = this._inputRef.current;
-    if (!textarea) return;
-    textarea.value = description;
-    textarea.style.height = 'auto';
-    textarea.style.height = Math.min(textarea.scrollHeight, (isMobile && !isPad) ? 160 : 120) + 'px';
-    this.setState({ inputEmpty: false });
-    textarea.focus();
+    if (textarea) {
+      textarea.value = description;
+      textarea.style.height = 'auto';
+      textarea.style.height = Math.min(textarea.scrollHeight, (isMobile && !isPad) ? 160 : 120) + 'px';
+      this.setState({ inputEmpty: false });
+      textarea.focus();
+    } else if (this._inputWs && this._inputWs.readyState === WebSocket.OPEN) {
+      // 终端模式下没有 textarea，直接通过 PTY 发送。
+      // 用 bracket-paste 包裹避免 description 含 `/` `!` `\t` 等被 Ink TUI 当特殊键解析。
+      this._inputWs.send(JSON.stringify({
+        type: 'input-sequential',
+        chunks: buildBracketPasteSubmitChunks(description),
+        settleMs: BRACKET_PASTE_SUBMIT_SETTLE_MS,
+      }));
+    }
   };
 
   // ─── UltraPlan handlers ─────────────────────────────────
@@ -2082,16 +2091,47 @@ class ChatView extends React.Component {
     }
     if (!assembled) return;
 
-    // 复用对话输入框的发送方式：写入 textarea → 触发 handleInputSend
-    const textarea = this._inputRef.current;
-    if (textarea) {
-      textarea.value = assembled;
-      textarea.style.height = 'auto';
-      textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
-      this.setState({ inputEmpty: false, ultraplanModalOpen: false, ultraplanPrompt: '', ultraplanVariant: 'codeExpert', ultraplanFiles: [] }, () => {
-        this.handleInputSend();
+    // WS 断开时不直接丢消息：把 assembled 写回 textarea 作草稿，让用户能手动重试。
+    // 不设 pendingInput（没真发出去，不该显示 optimistic bubble）。
+    const wsOpen = this._inputWs && this._inputWs.readyState === WebSocket.OPEN;
+    if (!wsOpen) {
+      const ta = this._inputRef.current;
+      if (ta) {
+        ta.value = assembled;
+        ta.style.height = 'auto';
+        ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+      }
+      this.setState({
+        ultraplanModalOpen: false,
+        ultraplanPrompt: '',
+        ultraplanVariant: 'codeExpert',
+        ultraplanFiles: [],
+        inputEmpty: ta ? !assembled : true,
+      }, () => {
+        if (ta) ta.focus();
       });
+      return;
     }
+
+    this.setState({
+      ultraplanModalOpen: false,
+      ultraplanPrompt: '',
+      ultraplanVariant: 'codeExpert',
+      ultraplanFiles: [],
+      pendingInput: userInput,
+      inputSuggestion: null,
+    }, () => {
+      if (this.props.sdkMode) {
+        this._inputWs.send(JSON.stringify({ type: 'sdk-user-message', text: assembled }));
+      } else {
+        this._inputWs.send(JSON.stringify({
+          type: 'input-sequential',
+          chunks: buildBracketPasteSubmitChunks(assembled),
+          settleMs: BRACKET_PASTE_SUBMIT_SETTLE_MS,
+        }));
+      }
+      this.scrollToBottom();
+    });
   };
 
   _handleUltraplanUpload = () => {
