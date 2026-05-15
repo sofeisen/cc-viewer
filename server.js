@@ -1032,7 +1032,18 @@ async function handleRequest(req, res) {
       const entries = readdirSync(targetDir, { withFileTypes: true });
       const items = entries
         .filter(e => !IGNORED_PATTERNS.has(e.name))
-        .map(e => ({ name: e.name, type: e.isDirectory() ? 'directory' : 'file' }))
+        .map(e => {
+          // Dirent.isDirectory() 不解引用 symlink —— 对指向目录的 symlink 也返回 false。
+          // 需要对 symlink 单独 statSync（follow link）才能拿到真实类型，否则前端会把
+          // symlink-to-dir 当成文件渲染，不可展开。断链时 fallback 到 file，避免单个
+          // 坏链接让整个目录返回 404。
+          let type = e.isDirectory() ? 'directory' : 'file';
+          if (e.isSymbolicLink()) {
+            try { type = statSync(join(targetDir, e.name)).isDirectory() ? 'directory' : 'file'; }
+            catch { type = 'file'; }
+          }
+          return { name: e.name, type };
+        })
         .sort((a, b) => {
           if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
           return a.name.localeCompare(b.name);
