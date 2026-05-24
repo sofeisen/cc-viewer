@@ -6,7 +6,7 @@ import { isIOS, isPad, setViewMode } from './env';
 import { isMainAgent, isSystemText, classifyUserContent } from './utils/contentFilter';
 import { getModelMaxTokens, getEffectiveModel, AUTO_COMPACT_USABLE_RATIO } from './utils/helpers';
 import ChatView from './components/ChatView';
-import TerminalPanel, { uploadFileAndGetPath } from './components/TerminalPanel';
+import TerminalPanel from './components/TerminalPanel';
 import { TerminalWsProvider } from './components/TerminalWsContext';
 import ToolApprovalPanel from './components/ToolApprovalPanel';
 import ApprovalModal from './components/ApprovalModal';
@@ -536,57 +536,24 @@ class Mobile extends AppBase {
     this.context.updatePreferences({ autoApproveSeconds: seconds });
   };
 
-  // ─── 拖拽上传（iPad / Mobile） ────────────────────────────
-  _isInternalDrag = (e) => e.dataTransfer.types.includes('text/x-preset-reorder');
+  // 拖拽上传逻辑已上提到 AppBase；Mobile 仅 override 两个分发钩子：终端可见时落入
+  // terminalPendingImages（图片队列），否则落入 pendingUploadPaths。toTerminal 在 drop
+  // 时刻捕获（经基类 _onDrop 的 _captureDropContext），保证上传期间切换终端不改变目标。
+  _captureDropContext() { return { toTerminal: this.state.mobileTerminalVisible }; }
 
-  _onDragOver = (e) => {
-    e.preventDefault();
-    if (this._isInternalDrag(e)) return;
-    const overFileExplorer = e.target.closest && e.target.closest('[data-file-explorer]');
-    if (overFileExplorer) {
-      if (this.state.isDragging) this.setState({ isDragging: false });
-      return;
+  _dispatchUploadedFiles(results, ctx) {
+    const uploaded = results.filter(Boolean);
+    if (!uploaded.length) return;
+    if (ctx?.toTerminal) {
+      this.setState(prev => ({
+        terminalPendingImages: [...prev.terminalPendingImages, ...uploaded.map(r => ({ path: r.path, source: 'drop' }))],
+      }));
+    } else {
+      this.setState(prev => ({
+        pendingUploadPaths: [...(prev.pendingUploadPaths || []), ...uploaded.map(r => `"${r.path}"`)],
+      }));
     }
-    if (!this.state.isDragging) this.setState({ isDragging: true });
-  };
-
-  _onDragLeave = (e) => {
-    const layout = this._layoutRef.current;
-    if (layout && !layout.contains(e.relatedTarget)) {
-      this.setState({ isDragging: false });
-    }
-  };
-
-  _onDrop = (e) => {
-    e.preventDefault();
-    if (this._isInternalDrag(e)) return;
-    this.setState({ isDragging: false });
-    const files = Array.from(e.dataTransfer.files);
-    if (!files.length) return;
-    const toTerminal = this.state.mobileTerminalVisible;
-    Promise.all(
-      files.map(file =>
-        uploadFileAndGetPath(file).then(path => ({ name: file.name, path }))
-          .catch(err => { message.error(`${file.name}: ${err.message}`); return null; })
-      )
-    ).then(results => {
-      const uploaded = results.filter(Boolean);
-      if (!uploaded.length) return;
-      if (toTerminal) {
-        this.setState(prev => ({
-          terminalPendingImages: [...prev.terminalPendingImages, ...uploaded.map(r => ({ path: r.path, source: 'drop' }))],
-        }));
-      } else {
-        this.setState(prev => ({
-          pendingUploadPaths: [...(prev.pendingUploadPaths || []), ...uploaded.map(r => `"${r.path}"`)],
-        }));
-      }
-    });
-  };
-
-  handleUploadPathsConsumed = () => {
-    this.setState({ pendingUploadPaths: [] });
-  };
+  }
 
   _handleTerminalFilePath = (path) => {
     this.setState(prev => ({

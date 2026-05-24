@@ -3,7 +3,6 @@ import { ConfigProvider, Layout, theme, Modal, Button, Checkbox, Spin, Alert, me
 import { UploadOutlined, DeleteOutlined, ReloadOutlined, FileZipOutlined } from '@ant-design/icons';
 import AppBase, { styles } from './AppBase';
 import { isMobile, isElectron, setViewMode } from './env';
-import { uploadFileAndGetPath } from './components/TerminalPanel';
 import AppHeader from './components/AppHeader';
 import RequestList from './components/RequestList';
 import DetailPanel from './components/DetailPanel';
@@ -222,82 +221,8 @@ class App extends AppBase {
     input.click();
   };
 
-  _processJsonlFiles = (files) => {
-    if (!files || files.length === 0) return;
-    const totalSize = files.reduce((s, f) => s + f.size, 0);
-    if (totalSize > 500 * 1024 * 1024) {
-      message.error(t('ui.fileTooLarge'));
-      return;
-    }
-    this.setState({ fileLoading: true, fileLoadingCount: 0 });
-    let readCount = 0;
-    const allEntries = [];
-    const fileNames = [];
-    files.forEach(file => {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        try {
-          const content = ev.target.result;
-          const entries = content.split('\n---\n').filter(line => line.trim()).map(entry => {
-            try { return JSON.parse(entry); } catch { return null; }
-          }).filter(Boolean);
-          allEntries.push(...entries);
-          fileNames.push(file.name);
-        } catch {}
-        readCount++;
-        if (readCount === files.length) {
-          this._finishLocalLoad(allEntries, fileNames);
-        }
-      };
-      reader.readAsText(file);
-    });
-  };
-
-  _isInternalDrag = (e) => e.dataTransfer.types.includes('text/x-preset-reorder');
-
-  _onDragOver = (e) => {
-    e.preventDefault();
-    if (this._isInternalDrag(e)) return;
-    // FileExplorer 区域不显示全屏 overlay，由 FileExplorer 自己处理外部拖入反馈
-    const overFileExplorer = e.target.closest && e.target.closest('[data-file-explorer]');
-    if (overFileExplorer) {
-      if (this.state.isDragging) this.setState({ isDragging: false });
-      return;
-    }
-    if (!this.state.isDragging) this.setState({ isDragging: true });
-  };
-
-  _onDragLeave = (e) => {
-    const layout = this._layoutRef.current;
-    if (layout && !layout.contains(e.relatedTarget)) {
-      this.setState({ isDragging: false });
-    }
-  };
-
-  _onDrop = (e) => {
-    e.preventDefault();
-    if (this._isInternalDrag(e)) return;
-    this.setState({ isDragging: false });
-    const files = Array.from(e.dataTransfer.files);
-    if (!files.length) return;
-    Promise.all(
-      files.map(file =>
-        uploadFileAndGetPath(file).then(path => ({ name: file.name, path }))
-          .catch(err => { message.error(`${file.name}: ${err.message}`); return null; })
-      )
-    ).then(results => {
-      const paths = results.filter(Boolean).map(r => `"${r.path}"`);
-      if (paths.length > 0) {
-        this.setState(prev => ({
-          pendingUploadPaths: [...(prev.pendingUploadPaths || []), ...paths],
-        }));
-      }
-    });
-  };
-
-  handleUploadPathsConsumed = () => {
-    this.setState({ pendingUploadPaths: [] });
-  };
+  // 拖拽上传（_isInternalDrag/_onDragOver/_onDragLeave/_onDrop/handleUploadPathsConsumed）
+  // 与默认分发逻辑已上提到 AppBase；App 用基类默认行为（全落 pendingUploadPaths），无需 override。
 
   // ─── PC 渲染 ──────────────────────────────────────────
 

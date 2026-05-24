@@ -1,5 +1,6 @@
 import React from 'react';
 import { ConfigProvider, theme, Modal, Spin, Button, message } from 'antd';
+import { uploadFileAndGetPath } from './components/TerminalPanel';
 import { DeleteOutlined, ReloadOutlined } from '@ant-design/icons';
 import { isMobile, isPad } from './env';
 import WorkspaceList from './components/WorkspaceList';
@@ -2067,6 +2068,62 @@ class AppBase extends React.Component {
         fileLoadingCount: 0,
       });
     });
+  };
+
+  // ─── 拖拽上传（App / Mobile 共享）─────────────────────────
+  // 文件拖入窗口 → 上传 → 落入 pendingUploadPaths。子类用 _captureDropContext()/
+  // _dispatchUploadedFiles() 两个 prototype 钩子定制分发（Mobile 按终端可见性分流）。
+  _isInternalDrag = (e) => e.dataTransfer.types.includes('text/x-preset-reorder');
+
+  _onDragOver = (e) => {
+    e.preventDefault();
+    if (this._isInternalDrag(e)) return;
+    // FileExplorer 区域不显示全屏 overlay，由 FileExplorer 自己处理外部拖入反馈
+    const overFileExplorer = e.target.closest && e.target.closest('[data-file-explorer]');
+    if (overFileExplorer) {
+      if (this.state.isDragging) this.setState({ isDragging: false });
+      return;
+    }
+    if (!this.state.isDragging) this.setState({ isDragging: true });
+  };
+
+  _onDragLeave = (e) => {
+    const layout = this._layoutRef.current;
+    if (layout && !layout.contains(e.relatedTarget)) {
+      this.setState({ isDragging: false });
+    }
+  };
+
+  _onDrop = (e) => {
+    e.preventDefault();
+    if (this._isInternalDrag(e)) return;
+    this.setState({ isDragging: false });
+    const files = Array.from(e.dataTransfer.files);
+    if (!files.length) return;
+    // drop 时刻同步捕获分发上下文（Mobile 需要 mobileTerminalVisible 的当时值，非上传完成后的值）
+    const ctx = this._captureDropContext();
+    Promise.all(
+      files.map(file =>
+        uploadFileAndGetPath(file).then(path => ({ name: file.name, path }))
+          .catch(err => { message.error(`${file.name}: ${err.message}`); return null; })
+      )
+    ).then(results => this._dispatchUploadedFiles(results, ctx));
+  };
+
+  // 子类可 override（prototype 方法）。默认＝桌面行为：全落入 pendingUploadPaths。
+  _captureDropContext() { return undefined; }
+
+  _dispatchUploadedFiles(results) {
+    const paths = results.filter(Boolean).map(r => `"${r.path}"`);
+    if (paths.length > 0) {
+      this.setState(prev => ({
+        pendingUploadPaths: [...(prev.pendingUploadPaths || []), ...paths],
+      }));
+    }
+  }
+
+  handleUploadPathsConsumed = () => {
+    this.setState({ pendingUploadPaths: [] });
   };
 
   // ─── 共享渲染辅助 ─────────────────────────────────────
