@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.275 (2026-05-25)
+
+- refactor(server): `server/server.js`(5467 → 1791 行)的 `handleRequest` 巨型 if-chain(84 路由)按功能域拆到 `server/routes/*` 14 个模块(project-meta / misc / preferences / git / plugins / logs / voice-pack / skills / files-fs / files-content / workspaces / events / ask-perm / team)+ 无依赖的 `_dispatch.js` 有序首匹配 dispatcher(保留方法区分与 prefix/exact 顺序语义,`/api/file-raw` 与 `/api/ask-hook/:id/result` 用 predicate);路由经单例 `deps`(getter 暴露可变运行时状态、直引共享 Map、helper/常量)注入,prelude / 静态服务 / WebSocket / lifecycle / 全部 export 仍留 `server.js`,纯搬移零行为变更;`stopViewer` 的 `clients` 改原地清空(`clients.length = 0`)保持引用稳定,消除 stop/start 循环的悬垂引用;清理 `server.js` 迁移后失效的死 import 与 `deps` 冗余键;新增 `test/route-dispatch.test.js` 守方法区分 + predicate 路由不变量
+
 ## 1.6.274 (2026-05-24)
 
 - refactor(components): `src/components/` 扁平目录按功能域重组为子目录 —— `chat`(含 `controllers/`,原 `chatview/`)、`terminal`、`git`、`files`、`viewers`、`approval`、`settings`、`mobile`、`dashboard`、`common`;所有组件及 co-located CSS 经 `git mv` 迁移并同步相对 import 路径,纯搬移零行为变更

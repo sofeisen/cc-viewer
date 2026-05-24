@@ -71,15 +71,16 @@ describe('AskUserQuestion 无超时/无降级 不变量', () => {
   });
 
   it('server.js HOOK_TIMEOUT / REPLAY_HOOK_TIMEOUT 必须引用 ASK_HOOK_TIMEOUT_MS 而非字面量', () => {
-    const src = readSource('server/server.js');
-    // HOOK_TIMEOUT 在 /api/ask-hook handler 内
-    const hookTimeoutAssign = src.match(/const\s+HOOK_TIMEOUT\s*=\s*([^;]+);/);
-    assert.ok(hookTimeoutAssign, 'server.js 必须声明 const HOOK_TIMEOUT');
+    // HOOK_TIMEOUT 在 /api/ask-hook handler 内（已迁出到 server/routes/ask-perm.js）
+    const askPermSrc = readSource('server/routes/ask-perm.js');
+    const hookTimeoutAssign = askPermSrc.match(/const\s+HOOK_TIMEOUT\s*=\s*([^;]+);/);
+    assert.ok(hookTimeoutAssign, 'routes/ask-perm.js 必须声明 const HOOK_TIMEOUT');
     assert.ok(
       /ASK_HOOK_TIMEOUT_MS/.test(hookTimeoutAssign[1]),
       `HOOK_TIMEOUT 必须引用 ASK_HOOK_TIMEOUT_MS（防字面量漂移），实测 "${hookTimeoutAssign[1].trim()}"`,
     );
-    // REPLAY_HOOK_TIMEOUT 在 WS reconnect replay 路径
+    // REPLAY_HOOK_TIMEOUT 在 WS reconnect replay 路径（仍在 server.js）
+    const src = readSource('server/server.js');
     const replayAssign = src.match(/const\s+REPLAY_HOOK_TIMEOUT\s*=\s*([^;]+);/);
     assert.ok(replayAssign, 'server.js 必须声明 const REPLAY_HOOK_TIMEOUT');
     assert.ok(
@@ -151,9 +152,10 @@ describe('AskUserQuestion 无超时/无降级 不变量', () => {
   });
 
   it('server.js / ask-bridge.js 共享同一 "X-Ask-Poll-Mode: short" 协议字符串', () => {
-    const server = readSource('server/server.js');
+    // server 侧的 ask-hook handler 已迁出到 server/routes/ask-perm.js
+    const server = readSource('server/routes/ask-perm.js');
     const bridge = readSource('server/lib/ask-bridge.js');
-    assert.ok(/['"]x-ask-poll-mode['"]/i.test(server), 'server.js 必须读 X-Ask-Poll-Mode header');
+    assert.ok(/['"]x-ask-poll-mode['"]/i.test(server), 'routes/ask-perm.js 必须读 X-Ask-Poll-Mode header');
     assert.ok(/['"]X-Ask-Poll-Mode['"]/.test(bridge), 'lib/ask-bridge.js 必须发 X-Ask-Poll-Mode header');
     assert.ok(/['"]short['"]/.test(server) && /['"]short['"]/.test(bridge), '协议值必须是字符串 "short"');
     assert.ok(/['"]short-poll['"]/.test(server) && /['"]short-poll['"]/.test(bridge), 'capability 必须是字符串 "short-poll"');
@@ -171,12 +173,15 @@ describe('AskUserQuestion 无超时/无降级 不变量', () => {
   });
 
   it('server.js GET /api/ask-hook/:id/result 端点存在（短轮询协议核心）', () => {
-    const src = readSource('server/server.js');
+    // GET /api/ask-hook/:id/result 路由已迁出到 server/routes/ask-perm.js（用 predicate 匹配）
+    const askPermSrc = readSource('server/routes/ask-perm.js');
     assert.ok(
-      /url\.startsWith\(['"]\/api\/ask-hook\/['"]\)/.test(src) && /\/result/.test(src),
-      'server.js 必须路由 GET /api/ask-hook/:id/result 端点',
+      /url\.startsWith\(['"]\/api\/ask-hook\/['"]\)/.test(askPermSrc) && /\/result/.test(askPermSrc),
+      'routes/ask-perm.js 必须路由 GET /api/ask-hook/:id/result 端点',
     );
-    assert.ok(/shortPollListeners/.test(src), 'server.js 必须有 shortPollListeners Map 处理 GET listener');
+    assert.ok(/shortPollListeners/.test(askPermSrc), 'routes/ask-perm.js 必须用 shortPollListeners 处理 GET listener');
+    // _notifyShortPollAnswer 推送答案的逻辑仍在 server.js 的 WS answer 路径
+    const src = readSource('server/server.js');
     assert.ok(/_notifyShortPollAnswer/.test(src), 'server.js 必须有 _notifyShortPollAnswer 推送答案');
   });
 
