@@ -3,7 +3,7 @@
 ## Hva de to inndatafeltene gjør
 
 - **Ekspertnavn**: etiketten som vises på rolleknappen i UltraPlan-variantraden (maks 30 tegn). Det er bare et visningsnavn og sendes **aldri** til Claude Code.
-- **Promptinnhold**: din rolleinstruksjon. Ved sending pakker cc-viewer det **automatisk** inn i `<system-reminder>...</system-reminder>`-tagger med en `[SCOPED INSTRUCTION]`-scope-header. Så **skriv kun selve innholdet** — ikke legg til `<system-reminder>`-tagger selv.
+- **Promptinnhold**: din rolleinstruksjon. Når du oppretter en ny ekspert, kommer editoren **ferdig utfylt** med `<system-reminder>...</system-reminder>`-wrapperen og dens `[SCOPED INSTRUCTION]`-scope-header — **skriv rolleinstruksjonen din inni wrapperen**. cc-viewer pakker ikke dobbelt: hvis wrapperen er til stede sendes den som den er; hvis du fjerner den, legger cc-viewer til en ny ved sending.
 
 ---
 
@@ -77,12 +77,12 @@ Your final plan must include the following elements:
 
 ## Seksjon-for-seksjon gjennomgang
 
-### 1. `[SCOPED INSTRUCTION]`-scope-header (wrapper — auto-generert)
+### 1. `[SCOPED INSTRUCTION]`-scope-header (wrapper — ferdig utfylt for deg)
 > The following instructions are intended for the next 1–3 interactions...
 
 Dette forteller Claude Code: **disse instruksjonene er kun aktive de neste 1–3 turene**, deretter avtar de. Hindrer at "ekspertpersonaen" lekker inn i urelaterte samtaler etterpå.
 
-**Denne linjen genereres av cc-viewer automatisk. Du trenger ikke å skrive den.**
+**Denne linjen kommer ferdig utfylt i editoren — la den stå som den er; du trenger ikke å skrive den om.**
 
 ### 2. Innledende oppgavedefinisjon (**dette er det du skal skrive om**)
 > Leverage a multi-agent exploration mechanism to formulate an exceptionally detailed implementation plan.
@@ -125,17 +125,19 @@ Den opprinnelige malen lister 6 elementer i en "implementeringsplan". Din levera
 
 ## Forfattertips (TL;DR)
 
-1. **Behold wrapperen**: `<system-reminder>` + `[SCOPED INSTRUCTION]`-linjen legges til av cc-viewer — ikke gjenta.
-2. **Skriv om åpningssetningen**: oppgi rolle, mål og utdataformat på én linje.
-3. **Flex arbeidsflyten**: 1–2 trinn for lette oppgaver, den fulle 5-trinns sløyfen kun for komplekse.
-4. **Skriv om Trinn 1s underroller**: standardene (akademiske artikler / konkurrenter / demo) er sannsynligvis ikke det du vil ha.
-5. **Den endelige "leveranse-sjekklisten" er din kvalitetslinje**: stav ut utdatastrukturen — Claude Code følger den strengt.
+1. **Skriv om åpningssetningen**: oppgi rolle, mål og utdataformat på én linje.
+2. **Flex arbeidsflyten**: 1–2 trinn for lette oppgaver, den fulle 5-trinns sløyfen kun for komplekse.
+3. **Skriv om Trinn 1s underroller**: standardene (akademiske artikler / konkurrenter / demo) er sannsynligvis ikke det du vil ha.
+4. **Den endelige "leveranse-sjekklisten" er din kvalitetslinje**: stav ut utdatastrukturen — Claude Code følger den strengt.
 
 ---
 
 ## Et omarbeidet eksempel: Competitive Analyst
 
 ```
+<system-reminder>
+[SCOPED INSTRUCTION] The following instructions apply only to the next 1–3 interactions. Once the task is complete, these instructions should gradually decrease in priority and no longer affect subsequent interactions. You should be adept at utilizing tools such as `AskUserQuestion`, `EnterPlanMode`, and `TeamCreate`, rather than relying solely on plain text processing.
+
 You are a senior competitive intelligence analyst for {industry}. Your goal is to
 produce a decision-grade competitive landscape report for the product "{our product}".
 
@@ -160,6 +162,7 @@ Instructions:
    - Pricing & GTM table
    - Top 3 strategic implications for our product
    - Caveats & data gaps
+</system-reminder>
 ```
 
 Sammenlignet med den originale Research Expert: trimmet til 4 trinn, underroller redusert fra 6 til 3, leveranseliste fullstendig omskrevet som "rapportseksjoner".

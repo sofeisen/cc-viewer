@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.279 (2026-05-27)
+
+- feat(ultraplan): 自定义专家弹窗改双栏——左栏常驻使用文档(代码块右上角一键复制),右栏编辑表单,去掉标题旁 ? 帮助入口;弹窗加宽至 ~1100;复制按钮在非安全上下文(局域网明文 HTTP)兜底不抛错、mermaid 代码块不挂复制按钮、弹窗开着时切语言重拉对应语种文档
+- feat(ultraplan): 自定义专家新建时预填 `<system-reminder>` + `[SCOPED INSTRUCTION]` 外壳骨架供壳内补充正文(发送时 buildCustomTemplate 幂等、不重复包壳,样板文案统一为含工具提示的版本);使用文档「写作建议」删去「保留外壳」一条
+- docs(ultraplan): 自定义专家使用文档的「改好的例子」也包上 `<system-reminder>` 外壳(复用 buildCustomTemplate,与右侧预填壳逐字节一致),避免读者对右侧预填文本产生误解;并把正文(输入框说明/逐段解释)从「cc-viewer 自动包壳、勿自己写」改述为「外壳已预填、在壳内编写」的新模型(18 语言同步)
+- fix(ci): Homebrew tap 发版后自动 bump——`bump-homebrew.yml` 改为 reusable workflow(`workflow_call`),由 `release.yml` 发版后链式调用(按最小权限只显式传 `HOMEBREW_TAP_TOKEN`,不用 `secrets: inherit`),绕开「GITHUB_TOKEN 创建的 release 不触发下游 workflow」导致的漏 bump;移除 `release:` 触发避免双跑,手动 `workflow_dispatch` 入口版本号改为必填
+
 ## 1.6.278 (2026-05-27)
 
 - feat(security): 本机(127.0.0.1=admin)打开代理热切换 / 钉钉设置时可查阅明文 API Key 与 AppSecret(编辑表单 👁 显示、可复制),已授权的远程客户端仍只拿脱敏值(代理 apiKey 仅 `****`+后4位、钉钉仅 `hasSecret`);门禁在 `GET /api/proxy-profiles` 与 `GET /api/dingtalk/status` 按 `isLocal` 切换,镜像 `/api/auth/state` 的密码明文策略;`defaultConfig.apiKey`(列表常显文本)始终脱敏

@@ -3,7 +3,7 @@
 ## Was die beiden Eingabefelder tun
 
 - **Expertenname**: das Label, das auf der Rollenschaltfläche in der UltraPlan-Variantenzeile angezeigt wird (max. 30 Zeichen). Es ist nur ein Anzeigename und wird **niemals** an Claude Code gesendet.
-- **Prompt-Inhalt**: Ihre Rollenanweisung. Beim Senden umschließt cc-viewer ihn **automatisch** mit `<system-reminder>...</system-reminder>`-Tags und einem `[SCOPED INSTRUCTION]`-Scope-Header. Schreiben Sie also **nur den Inhalt** — fügen Sie keine `<system-reminder>`-Tags selbst hinzu.
+- **Prompt-Inhalt**: Ihre Rollenanweisung. Beim Anlegen eines neuen Experten **ist der Editor vorausgefüllt** mit dem `<system-reminder>...</system-reminder>`-Wrapper und seinem `[SCOPED INSTRUCTION]`-Scope-Header — **schreiben Sie Ihre Rollenanweisung innerhalb des Wrappers**. cc-viewer umschließt nicht doppelt: Ist der Wrapper vorhanden, wird er unverändert gesendet; entfernen Sie ihn, fügt cc-viewer beim Senden wieder einen hinzu.
 
 ---
 
@@ -77,12 +77,12 @@ Your final plan must include the following elements:
 
 ## Aufschlüsselung Abschnitt für Abschnitt
 
-### 1. `[SCOPED INSTRUCTION]`-Scope-Header (Wrapper — automatisch generiert)
+### 1. `[SCOPED INSTRUCTION]`-Scope-Header (Wrapper — für Sie vorausgefüllt)
 > The following instructions are intended for the next 1–3 interactions...
 
 Dies teilt Claude Code mit: **diese Anweisungen sind nur für die nächsten 1–3 Runden aktiv**, danach werden sie ausgeblendet. Verhindert, dass die „Expertenpersona" anschließend in unzusammenhängende Konversationen einsickert.
 
-**Diese Zeile wird automatisch von cc-viewer generiert. Sie müssen sie nicht schreiben.**
+**Diese Zeile ist im Editor vorausgefüllt — lassen Sie sie unverändert; Sie müssen sie nicht neu schreiben.**
 
 ### 2. Einführende Aufgabendefinition (**das ist es, was Sie umschreiben sollten**)
 > Leverage a multi-agent exploration mechanism to formulate an exceptionally detailed implementation plan.
@@ -125,17 +125,19 @@ Die ursprüngliche Vorlage listet 6 Elemente eines „Implementierungsplans" auf
 
 ## Tipps zur Erstellung (TL;DR)
 
-1. **Behalten Sie den Wrapper**: `<system-reminder>` + `[SCOPED INSTRUCTION]`-Zeile wird von cc-viewer hinzugefügt — nicht wiederholen.
-2. **Schreiben Sie den Eröffnungssatz um**: nennen Sie Rolle, Ziel und Ausgabeformat in einer Zeile.
-3. **Flexibler Workflow**: 1–2 Schritte für leichte Aufgaben, die volle 5-Schritte-Schleife nur für komplexe.
-4. **Schreiben Sie die Unterrollen aus Schritt 1 um**: die Standardwerte (akademische Arbeiten / Wettbewerber / Demo) sind wahrscheinlich nicht das, was Sie wollen.
-5. **Die finale „Liefer-Checkliste" ist Ihre Qualitätsschwelle**: spezifizieren Sie die Ausgabestruktur — Claude Code wird sie strikt befolgen.
+1. **Schreiben Sie den Eröffnungssatz um**: nennen Sie Rolle, Ziel und Ausgabeformat in einer Zeile.
+2. **Flexibler Workflow**: 1–2 Schritte für leichte Aufgaben, die volle 5-Schritte-Schleife nur für komplexe.
+3. **Schreiben Sie die Unterrollen aus Schritt 1 um**: die Standardwerte (akademische Arbeiten / Wettbewerber / Demo) sind wahrscheinlich nicht das, was Sie wollen.
+4. **Die finale „Liefer-Checkliste" ist Ihre Qualitätsschwelle**: spezifizieren Sie die Ausgabestruktur — Claude Code wird sie strikt befolgen.
 
 ---
 
 ## Ein überarbeitetes Beispiel: Wettbewerbsanalyst
 
 ```
+<system-reminder>
+[SCOPED INSTRUCTION] The following instructions apply only to the next 1–3 interactions. Once the task is complete, these instructions should gradually decrease in priority and no longer affect subsequent interactions. You should be adept at utilizing tools such as `AskUserQuestion`, `EnterPlanMode`, and `TeamCreate`, rather than relying solely on plain text processing.
+
 You are a senior competitive intelligence analyst for {industry}. Your goal is to
 produce a decision-grade competitive landscape report for the product "{our product}".
 
@@ -160,6 +162,7 @@ Instructions:
    - Pricing & GTM table
    - Top 3 strategic implications for our product
    - Caveats & data gaps
+</system-reminder>
 ```
 
 Im Vergleich zum ursprünglichen Research Expert: auf 4 Schritte gekürzt, Unterrollen von 6 auf 3 reduziert, Liefer-Liste vollständig als „Berichtsabschnitte" umgeschrieben.

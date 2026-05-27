@@ -112,8 +112,11 @@ Your final plan must include the following elements:
 export function buildCustomTemplate(content) {
   const body = (content || '').trim();
   if (!body) return '';
+  // 用户已自带外壳(预填的样板壳或手写)时不再重复包裹;用 startsWith 而非 includes,
+  // 避免正文里只是「提到」<system-reminder> 字样就误判而漏掉作用域声明。
+  if (body.startsWith('<system-reminder>')) return body;
   return `<system-reminder>
-[SCOPED INSTRUCTION] The following instructions are intended for the next 1–3 interactions. Once the task is complete, these instructions should be gradually deprioritized and no longer influence subsequent interactions.
+[SCOPED INSTRUCTION] The following instructions apply only to the next 1–3 interactions. Once the task is complete, these instructions should gradually decrease in priority and no longer affect subsequent interactions. You should be adept at utilizing tools such as \`AskUserQuestion\`, \`EnterPlanMode\`, and \`TeamCreate\`, rather than relying solely on plain text processing.
 
 ${body}
 </system-reminder>`;

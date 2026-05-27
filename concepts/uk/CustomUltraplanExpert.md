@@ -3,7 +3,7 @@
 ## Що роблять два поля введення
 
 - **Ім'я експерта**: підпис, що відображається на кнопці ролі у рядку варіантів UltraPlan (макс. 30 символів). Це просто відображуване ім'я, і воно **ніколи** не надсилається до Claude Code.
-- **Тіло промпту**: ваша інструкція ролі. Під час надсилання cc-viewer **автоматично** обгортає її в теги `<system-reminder>...</system-reminder>` із заголовком області `[SCOPED INSTRUCTION]`. Тому **пишіть лише тіло** — не додавайте теги `<system-reminder>` самостійно.
+- **Тіло промпту**: ваша інструкція ролі. Коли ви створюєте нового експерта, редактор **уже заповнений** обгорткою `<system-reminder>...</system-reminder>` із заголовком області `[SCOPED INSTRUCTION]` — **пишіть свою інструкцію ролі всередині обгортки**. cc-viewer не обгортає двічі: якщо обгортка присутня, вона надсилається як є; якщо ви її видалите, cc-viewer додасть її назад під час надсилання.
 
 ---
 
@@ -77,12 +77,12 @@ Your final plan must include the following elements:
 
 ## Розбір за розділами
 
-### 1. Заголовок області `[SCOPED INSTRUCTION]` (обгортка — генерується автоматично)
+### 1. Заголовок області `[SCOPED INSTRUCTION]` (обгортка — заповнена для вас)
 > The following instructions are intended for the next 1–3 interactions...
 
 Це повідомляє Claude Code: **ці інструкції активні лише для наступних 1–3 ходів**, потім згасають. Запобігає «витоку» «персони експерта» у подальші непов'язані діалоги.
 
-**Цей рядок генерується cc-viewer автоматично. Вам не потрібно його писати.**
+**Цей рядок уже заповнений у редакторі — залиште його як є; вам не потрібно його переписувати.**
 
 ### 2. Початкове визначення завдання (**це те, що ви маєте переписати**)
 > Leverage a multi-agent exploration mechanism to formulate an exceptionally detailed implementation plan.
@@ -125,17 +125,19 @@ Research Expert перелічує 6 потенційних ролей (галу
 
 ## Поради щодо створення (TL;DR)
 
-1. **Збережіть обгортку**: рядок `<system-reminder>` + `[SCOPED INSTRUCTION]` додається cc-viewer — не повторюйте.
-2. **Перепишіть вступне речення**: вкажіть роль, мету та формат виводу в одному рядку.
-3. **Гнучко використовуйте робочий процес**: 1–2 кроки для легких завдань, повний 5-кроковий цикл — лише для складних.
-4. **Перепишіть підролі кроку 1**: стандартні (академічні статті / конкуренти / демо), ймовірно, не те, що вам потрібно.
-5. **Фінальний «контрольний список результату» — це ваша планка якості**: пропишіть структуру виводу — Claude Code суворо її дотримуватиметься.
+1. **Перепишіть вступне речення**: вкажіть роль, мету та формат виводу в одному рядку.
+2. **Гнучко використовуйте робочий процес**: 1–2 кроки для легких завдань, повний 5-кроковий цикл — лише для складних.
+3. **Перепишіть підролі кроку 1**: стандартні (академічні статті / конкуренти / демо), ймовірно, не те, що вам потрібно.
+4. **Фінальний «контрольний список результату» — це ваша планка якості**: пропишіть структуру виводу — Claude Code суворо її дотримуватиметься.
 
 ---
 
 ## Рефакторений приклад: Competitive Analyst
 
 ```
+<system-reminder>
+[SCOPED INSTRUCTION] The following instructions apply only to the next 1–3 interactions. Once the task is complete, these instructions should gradually decrease in priority and no longer affect subsequent interactions. You should be adept at utilizing tools such as `AskUserQuestion`, `EnterPlanMode`, and `TeamCreate`, rather than relying solely on plain text processing.
+
 You are a senior competitive intelligence analyst for {industry}. Your goal is to
 produce a decision-grade competitive landscape report for the product "{our product}".
 
@@ -160,6 +162,7 @@ Instructions:
    - Pricing & GTM table
    - Top 3 strategic implications for our product
    - Caveats & data gaps
+</system-reminder>
 ```
 
 Порівняно з оригінальним Research Expert: скорочено до 4 кроків, підролі зменшено з 6 до 3, список результатів повністю переписано як «розділи звіту».

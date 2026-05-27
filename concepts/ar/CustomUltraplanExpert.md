@@ -3,7 +3,7 @@
 ## ما الذي يفعله حقلا الإدخال
 
 - **اسم الخبير**: التسمية المعروضة على زر الدور في صف خيارات UltraPlan (بحد أقصى 30 حرفًا). إنه مجرد اسم عرض ولا يُرسل **أبدًا** إلى Claude Code.
-- **نص الموجّه (Prompt body)**: تعليمات الدور الخاصة بك. عند الإرسال، يقوم cc-viewer **تلقائيًا** بتغليفه بوسوم `<system-reminder>...</system-reminder>` مع ترويسة نطاق `[SCOPED INSTRUCTION]`. لذا **اكتب النص فقط** — لا تضف وسوم `<system-reminder>` بنفسك.
+- **نص الموجّه (Prompt body)**: تعليمات الدور الخاصة بك. عند إنشاء خبير جديد، يأتي المحرر **مُعبّأً مسبقًا** بغلاف `<system-reminder>...</system-reminder>` وترويسة النطاق `[SCOPED INSTRUCTION]` الخاصة به — **اكتب تعليمات الدور داخل الغلاف**. لن يقوم cc-viewer بالتغليف مرتين: إن كان الغلاف موجودًا يُرسل كما هو؛ وإن أزلته، يضيف cc-viewer واحدًا عند الإرسال.
 
 ---
 
@@ -77,12 +77,12 @@ Your final plan must include the following elements:
 
 ## التحليل قسمًا بقسم
 
-### 1. ترويسة نطاق `[SCOPED INSTRUCTION]` (الغلاف — يُولَّد تلقائيًا)
+### 1. ترويسة نطاق `[SCOPED INSTRUCTION]` (الغلاف — مُعبّأ مسبقًا لك)
 > The following instructions are intended for the next 1–3 interactions...
 
 يُخبر هذا Claude Code: **هذه التعليمات نشطة فقط للأدوار الـ 1–3 التالية**، ثم تتلاشى. يمنع تسرب «شخصية الخبير» إلى محادثات لاحقة غير ذات صلة.
 
-**يتم توليد هذا السطر بواسطة cc-viewer تلقائيًا. لست بحاجة لكتابته.**
+**يأتي هذا السطر مُعبّأً مسبقًا في المحرر — اتركه كما هو؛ لست بحاجة لإعادة كتابته.**
 
 ### 2. تعريف المهمة الافتتاحي (**هذا ما يجب عليك إعادة كتابته**)
 > Leverage a multi-agent exploration mechanism to formulate an exceptionally detailed implementation plan.
@@ -125,17 +125,19 @@ Your final plan must include the following elements:
 
 ## نصائح التأليف (TL;DR)
 
-1. **احتفظ بالغلاف**: سطر `<system-reminder>` + `[SCOPED INSTRUCTION]` يُضاف بواسطة cc-viewer — لا تكرره.
-2. **أعد كتابة الجملة الافتتاحية**: اذكر الدور والهدف وصيغة المخرجات في سطر واحد.
-3. **مرّن سير العمل**: 1–2 خطوة للمهام الخفيفة، الحلقة الكاملة المكونة من 5 خطوات للمعقدة فقط.
-4. **أعد كتابة الأدوار الفرعية للخطوة 1**: الافتراضات (الأوراق الأكاديمية / المنافسون / demo) ربما ليست ما تريد.
-5. **«قائمة فحص المخرجات» النهائية هي معيار الجودة لديك**: حدد بنية المخرجات — سيتبعها Claude Code بصرامة.
+1. **أعد كتابة الجملة الافتتاحية**: اذكر الدور والهدف وصيغة المخرجات في سطر واحد.
+2. **مرّن سير العمل**: 1–2 خطوة للمهام الخفيفة، الحلقة الكاملة المكونة من 5 خطوات للمعقدة فقط.
+3. **أعد كتابة الأدوار الفرعية للخطوة 1**: الافتراضات (الأوراق الأكاديمية / المنافسون / demo) ربما ليست ما تريد.
+4. **«قائمة فحص المخرجات» النهائية هي معيار الجودة لديك**: حدد بنية المخرجات — سيتبعها Claude Code بصرامة.
 
 ---
 
 ## مثال معاد هيكلته: Competitive Analyst
 
 ```
+<system-reminder>
+[SCOPED INSTRUCTION] The following instructions apply only to the next 1–3 interactions. Once the task is complete, these instructions should gradually decrease in priority and no longer affect subsequent interactions. You should be adept at utilizing tools such as `AskUserQuestion`, `EnterPlanMode`, and `TeamCreate`, rather than relying solely on plain text processing.
+
 You are a senior competitive intelligence analyst for {industry}. Your goal is to
 produce a decision-grade competitive landscape report for the product "{our product}".
 
@@ -160,6 +162,7 @@ Instructions:
    - Pricing & GTM table
    - Top 3 strategic implications for our product
    - Caveats & data gaps
+</system-reminder>
 ```
 
 مقارنة بـ Research Expert الأصلي: تم اختصاره إلى 4 خطوات، خُفِّضت الأدوار الفرعية من 6 إلى 3، وأُعيدت كتابة قائمة المخرجات بالكامل كـ «أقسام تقرير».

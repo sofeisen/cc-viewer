@@ -3,7 +3,7 @@
 ## Что делают два поля ввода
 
 - **Имя эксперта**: подпись, отображаемая на кнопке роли в строке вариантов UltraPlan (макс. 30 символов). Это просто отображаемое имя, и оно **никогда** не отправляется в Claude Code.
-- **Тело промпта**: ваша инструкция роли. При отправке cc-viewer **автоматически** оборачивает её в теги `<system-reminder>...</system-reminder>` с заголовком области `[SCOPED INSTRUCTION]`. Поэтому **пишите только тело** — не добавляйте теги `<system-reminder>` самостоятельно.
+- **Тело промпта**: ваша инструкция роли. При создании нового эксперта редактор **предзаполнен** обёрткой `<system-reminder>...</system-reminder>` с её заголовком области `[SCOPED INSTRUCTION]` — **пишите свою инструкцию роли внутри обёртки**. cc-viewer не оборачивает дважды: если обёртка присутствует, она отправляется как есть; если вы её удалите, cc-viewer добавит новую при отправке.
 
 ---
 
@@ -77,12 +77,12 @@ Your final plan must include the following elements:
 
 ## Разбор по разделам
 
-### 1. Заголовок области `[SCOPED INSTRUCTION]` (обёртка — генерируется автоматически)
+### 1. Заголовок области `[SCOPED INSTRUCTION]` (обёртка — предзаполнена за вас)
 > The following instructions are intended for the next 1–3 interactions...
 
 Это говорит Claude Code: **эти инструкции активны только для следующих 1–3 ходов**, затем затухают. Предотвращает «утечку» «персоны эксперта» в последующие несвязанные диалоги.
 
-**Эта строка генерируется cc-viewer автоматически. Вам не нужно её писать.**
+**Эта строка предзаполнена в редакторе — оставьте её как есть; вам не нужно её переписывать.**
 
 ### 2. Начальное определение задачи (**это то, что вы должны переписать**)
 > Leverage a multi-agent exploration mechanism to formulate an exceptionally detailed implementation plan.
@@ -125,17 +125,19 @@ Research Expert перечисляет 6 потенциальных ролей (
 
 ## Советы по созданию (TL;DR)
 
-1. **Сохраните обёртку**: строка `<system-reminder>` + `[SCOPED INSTRUCTION]` добавляется cc-viewer — не повторяйте.
-2. **Перепишите вступительное предложение**: укажите роль, цель и формат вывода в одной строке.
-3. **Гибко используйте рабочий процесс**: 1–2 шага для лёгких задач, полный 5-шаговый цикл — только для сложных.
-4. **Перепишите подроли шага 1**: дефолты (академические статьи / конкуренты / демо), вероятно, не то, что вам нужно.
-5. **Финальный «контрольный список результата» — это ваша планка качества**: пропишите структуру вывода — Claude Code будет строго ей следовать.
+1. **Перепишите вступительное предложение**: укажите роль, цель и формат вывода в одной строке.
+2. **Гибко используйте рабочий процесс**: 1–2 шага для лёгких задач, полный 5-шаговый цикл — только для сложных.
+3. **Перепишите подроли шага 1**: дефолты (академические статьи / конкуренты / демо), вероятно, не то, что вам нужно.
+4. **Финальный «контрольный список результата» — это ваша планка качества**: пропишите структуру вывода — Claude Code будет строго ей следовать.
 
 ---
 
 ## Рефакторенный пример: Competitive Analyst
 
 ```
+<system-reminder>
+[SCOPED INSTRUCTION] The following instructions apply only to the next 1–3 interactions. Once the task is complete, these instructions should gradually decrease in priority and no longer affect subsequent interactions. You should be adept at utilizing tools such as `AskUserQuestion`, `EnterPlanMode`, and `TeamCreate`, rather than relying solely on plain text processing.
+
 You are a senior competitive intelligence analyst for {industry}. Your goal is to
 produce a decision-grade competitive landscape report for the product "{our product}".
 
@@ -160,6 +162,7 @@ Instructions:
    - Pricing & GTM table
    - Top 3 strategic implications for our product
    - Caveats & data gaps
+</system-reminder>
 ```
 
 По сравнению с оригинальным Research Expert: сокращено до 4 шагов, подроли уменьшены с 6 до 3, список результатов полностью переписан как «разделы отчёта».

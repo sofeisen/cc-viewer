@@ -3,7 +3,7 @@
 ## 两个输入框的作用
 
 - **专家名称**：显示在 UltraPlan 弹窗变体行里的按钮标题，30 字符以内。只是一个标签，不会被发送给 Claude Code。
-- **提示词正文**：你写给 Claude Code 的"角色指令"。发送时会被**自动**用 `<system-reminder>...</system-reminder>` 标签包裹，并在最前面加上一行 `[SCOPED INSTRUCTION]` 的作用域声明。所以你**只需要写正文**，不要自己加 `<system-reminder>` 标签。
+- **提示词正文**：你的角色指令。新建专家时，编辑框已**预填**好 `<system-reminder>...</system-reminder>` 外壳及其 `[SCOPED INSTRUCTION]` 作用域声明——**在外壳内编写你的角色指令**即可。cc-viewer 不会重复包壳：壳还在就原样发送；你删掉了，发送时 cc-viewer 会再补一层。
 
 ---
 
@@ -77,12 +77,12 @@ Your final plan must include the following elements:
 
 ## 逐段解释
 
-### 1. `[SCOPED INSTRUCTION]` 作用域声明（外壳，自动生成）
+### 1. `[SCOPED INSTRUCTION]` 作用域声明（外壳，已为你预填）
 > The following instructions are intended for the next 1–3 interactions...
 
 这行告诉 Claude Code：这段指令**只在未来 1–3 轮对话中强制执行**，任务完成后就淡出，不再影响后续交互。避免"专家人格"污染到任务之外的对话。
 
-**这行由 ccv 自动生成，你不需要写。**
+**这一行已预填在编辑框里——保持原样即可，不用自己重写。**
 
 ### 2. 首段任务定义（**这段最值得你改**）
 > Leverage a multi-agent exploration mechanism to formulate an exceptionally detailed implementation plan.
@@ -122,17 +122,19 @@ Your final plan must include the following elements:
 
 ## 写作建议（TL;DR）
 
-1. **保留外壳**（`<system-reminder>` 和 `[SCOPED INSTRUCTION]` 那行 ccv 自动加，你别重复写）。
-2. **重点改首段**：用一句话明确角色、目标、产出形式。
-3. **流程视复杂度伸缩**：轻量任务 1–2 步够了，复杂任务才走 5 步的多代理 + 审查闭环。
-4. **Step 1 的子角色按领域重写**：默认那些（academic papers / competitor / demo）大概率不是你要的。
-5. **最后的"产出清单"是 quality bar**：写清楚你期望的输出结构，Claude Code 会严格按这个出结果。
+1. **重点改首段**：用一句话明确角色、目标、产出形式。
+2. **流程视复杂度伸缩**：轻量任务 1–2 步够了，复杂任务才走 5 步的多代理 + 审查闭环。
+3. **Step 1 的子角色按领域重写**：默认那些（academic papers / competitor / demo）大概率不是你要的。
+4. **最后的"产出清单"是 quality bar**：写清楚你期望的输出结构，Claude Code 会严格按这个出结果。
 
 ---
 
 ## 一个改好的例子（竞品分析专家）
 
 ```
+<system-reminder>
+[SCOPED INSTRUCTION] The following instructions apply only to the next 1–3 interactions. Once the task is complete, these instructions should gradually decrease in priority and no longer affect subsequent interactions. You should be adept at utilizing tools such as `AskUserQuestion`, `EnterPlanMode`, and `TeamCreate`, rather than relying solely on plain text processing.
+
 You are a senior competitive intelligence analyst for {行业}. Your goal is to
 produce a decision-grade competitive landscape report for the product "{我方产品}".
 
@@ -157,6 +159,7 @@ Instructions:
    - Pricing & GTM table
    - Top 3 strategic implications for our product
    - Caveats & data gaps
+</system-reminder>
 ```
 
 这份相比调研专家原版：精简到 4 步，子角色从 6 个减到 3 个，产出清单完全重写成"报告章节"。

@@ -3,7 +3,7 @@
 ## O que fazem os dois campos de entrada
 
 - **Nome do especialista**: o rótulo exibido no botão de função na linha de variantes do UltraPlan (máx. 30 caracteres). É apenas um nome de exibição e **nunca** é enviado ao Claude Code.
-- **Corpo do prompt**: sua instrução de função. No momento do envio, o cc-viewer **automaticamente** o envolve em tags `<system-reminder>...</system-reminder>` com um cabeçalho de escopo `[SCOPED INSTRUCTION]`. Portanto, **escreva apenas o corpo** — não adicione tags `<system-reminder>` por conta própria.
+- **Corpo do prompt**: sua instrução de função. Quando você cria um novo especialista, o editor **vem pré-preenchido** com o wrapper `<system-reminder>...</system-reminder>` e seu cabeçalho de escopo `[SCOPED INSTRUCTION]` — **escreva sua instrução de função dentro do wrapper**. O cc-viewer não envolve em duplicidade: se o wrapper estiver presente, ele é enviado como está; se você o remover, o cc-viewer adiciona um de volta no momento do envio.
 
 ---
 
@@ -77,12 +77,12 @@ Your final plan must include the following elements:
 
 ## Análise seção por seção
 
-### 1. Cabeçalho de escopo `[SCOPED INSTRUCTION]` (wrapper — gerado automaticamente)
+### 1. Cabeçalho de escopo `[SCOPED INSTRUCTION]` (wrapper — pré-preenchido para você)
 > The following instructions are intended for the next 1–3 interactions...
 
 Isso diz ao Claude Code: **estas instruções estão ativas apenas para as próximas 1–3 rodadas**, depois se dissipam. Impede que a "persona do especialista" vaze para conversas não relacionadas posteriormente.
 
-**Esta linha é gerada automaticamente pelo cc-viewer. Você não precisa escrevê-la.**
+**Esta linha vem pré-preenchida no editor — mantenha-a como está; você não precisa reescrevê-la.**
 
 ### 2. Definição da tarefa inicial (**isto é o que você deve reescrever**)
 > Leverage a multi-agent exploration mechanism to formulate an exceptionally detailed implementation plan.
@@ -125,17 +125,19 @@ O modelo original lista 6 elementos de um "plano de implementação". Seu entreg
 
 ## Dicas de criação (TL;DR)
 
-1. **Mantenha o wrapper**: a linha `<system-reminder>` + `[SCOPED INSTRUCTION]` é adicionada pelo cc-viewer — não repita.
-2. **Reescreva a frase inicial**: declare a função, o objetivo e o formato de saída em uma única linha.
-3. **Flexibilize o fluxo de trabalho**: 1–2 etapas para tarefas leves, o ciclo completo de 5 etapas apenas para as complexas.
-4. **Reescreva as subfunções da Etapa 1**: os padrões (artigos acadêmicos / concorrentes / demo) provavelmente não são o que você quer.
-5. **A "lista de verificação de entregáveis" final é seu padrão de qualidade**: especifique a estrutura de saída — o Claude Code seguirá rigorosamente.
+1. **Reescreva a frase inicial**: declare a função, o objetivo e o formato de saída em uma única linha.
+2. **Flexibilize o fluxo de trabalho**: 1–2 etapas para tarefas leves, o ciclo completo de 5 etapas apenas para as complexas.
+3. **Reescreva as subfunções da Etapa 1**: os padrões (artigos acadêmicos / concorrentes / demo) provavelmente não são o que você quer.
+4. **A "lista de verificação de entregáveis" final é seu padrão de qualidade**: especifique a estrutura de saída — o Claude Code seguirá rigorosamente.
 
 ---
 
 ## Um exemplo refatorado: Analista competitivo
 
 ```
+<system-reminder>
+[SCOPED INSTRUCTION] The following instructions apply only to the next 1–3 interactions. Once the task is complete, these instructions should gradually decrease in priority and no longer affect subsequent interactions. You should be adept at utilizing tools such as `AskUserQuestion`, `EnterPlanMode`, and `TeamCreate`, rather than relying solely on plain text processing.
+
 You are a senior competitive intelligence analyst for {industry}. Your goal is to
 produce a decision-grade competitive landscape report for the product "{our product}".
 
@@ -160,6 +162,7 @@ Instructions:
    - Pricing & GTM table
    - Top 3 strategic implications for our product
    - Caveats & data gaps
+</system-reminder>
 ```
 
 Em comparação com o Research Expert original: reduzido para 4 etapas, subfunções reduzidas de 6 para 3, lista de entregáveis totalmente reescrita como "seções do relatório".

@@ -3,7 +3,7 @@
 ## İki giriş alanı ne işe yarar
 
 - **Uzman adı**: UltraPlan varyant satırındaki rol düğmesinde gösterilen etiket (maks. 30 karakter). Yalnızca bir görüntü adıdır ve **asla** Claude Code'a gönderilmez.
-- **Prompt gövdesi**: rol talimatınız. Gönderim sırasında cc-viewer **otomatik olarak** bunu `[SCOPED INSTRUCTION]` kapsam başlığıyla birlikte `<system-reminder>...</system-reminder>` etiketleriyle sarmalar. Bu yüzden **yalnızca gövdeyi yazın** — `<system-reminder>` etiketlerini kendiniz eklemeyin.
+- **Prompt gövdesi**: rol talimatınız. Yeni bir uzman oluşturduğunuzda, düzenleyici `<system-reminder>...</system-reminder>` sarmalayıcısı ve `[SCOPED INSTRUCTION]` kapsam başlığıyla **önceden doldurulmuş** gelir — **rol talimatınızı sarmalayıcının içine yazın**. cc-viewer çift sarmalama yapmaz: sarmalayıcı varsa olduğu gibi gönderilir; onu kaldırırsanız cc-viewer gönderim sırasında bir tane geri ekler.
 
 ---
 
@@ -77,12 +77,12 @@ Your final plan must include the following elements:
 
 ## Bölüm bölüm analiz
 
-### 1. `[SCOPED INSTRUCTION]` kapsam başlığı (sarmalayıcı — otomatik üretilir)
+### 1. `[SCOPED INSTRUCTION]` kapsam başlığı (sarmalayıcı — sizin için önceden doldurulur)
 > The following instructions are intended for the next 1–3 interactions...
 
 Bu, Claude Code'a şunu söyler: **bu talimatlar yalnızca sonraki 1–3 turda etkindir**, sonra silinir. "Uzman kişiliğinin" sonradan ilgisiz konuşmalara sızmasını önler.
 
-**Bu satır cc-viewer tarafından otomatik üretilir. Sizin yazmanıza gerek yok.**
+**Bu satır düzenleyicide önceden doldurulmuş gelir — olduğu gibi bırakın; yeniden yazmanıza gerek yok.**
 
 ### 2. Açılış görev tanımı (**yeniden yazmanız gereken kısım budur**)
 > Leverage a multi-agent exploration mechanism to formulate an exceptionally detailed implementation plan.
@@ -125,17 +125,19 @@ Orijinal şablon "uygulama planının" 6 öğesini listeler. Teslimatınız tama
 
 ## Yazım ipuçları (TL;DR)
 
-1. **Sarmalayıcıyı koruyun**: `<system-reminder>` + `[SCOPED INSTRUCTION]` satırı cc-viewer tarafından eklenir — tekrarlamayın.
-2. **Açılış cümlesini yeniden yazın**: rol, hedef ve çıktı formatını tek satırda belirtin.
-3. **İş akışını esnetin**: hafif görevler için 1–2 adım, tam 5 adımlı döngü yalnızca karmaşık olanlar için.
-4. **Adım 1 alt rollerini yeniden yazın**: varsayılanlar (akademik makaleler / rakipler / demo) muhtemelen istediğiniz şey değildir.
-5. **Nihai "teslimat kontrol listesi" kalite çıtanızdır**: çıktı yapısını detaylı belirtin — Claude Code buna katı şekilde uyacaktır.
+1. **Açılış cümlesini yeniden yazın**: rol, hedef ve çıktı formatını tek satırda belirtin.
+2. **İş akışını esnetin**: hafif görevler için 1–2 adım, tam 5 adımlı döngü yalnızca karmaşık olanlar için.
+3. **Adım 1 alt rollerini yeniden yazın**: varsayılanlar (akademik makaleler / rakipler / demo) muhtemelen istediğiniz şey değildir.
+4. **Nihai "teslimat kontrol listesi" kalite çıtanızdır**: çıktı yapısını detaylı belirtin — Claude Code buna katı şekilde uyacaktır.
 
 ---
 
 ## Yeniden düzenlenmiş örnek: Competitive Analyst
 
 ```
+<system-reminder>
+[SCOPED INSTRUCTION] The following instructions apply only to the next 1–3 interactions. Once the task is complete, these instructions should gradually decrease in priority and no longer affect subsequent interactions. You should be adept at utilizing tools such as `AskUserQuestion`, `EnterPlanMode`, and `TeamCreate`, rather than relying solely on plain text processing.
+
 You are a senior competitive intelligence analyst for {industry}. Your goal is to
 produce a decision-grade competitive landscape report for the product "{our product}".
 
@@ -160,6 +162,7 @@ Instructions:
    - Pricing & GTM table
    - Top 3 strategic implications for our product
    - Caveats & data gaps
+</system-reminder>
 ```
 
 Orijinal Research Expert ile karşılaştırıldığında: 4 adıma kısaltıldı, alt roller 6'dan 3'e düşürüldü, teslimat listesi tamamen "rapor bölümleri" olarak yeniden yazıldı.

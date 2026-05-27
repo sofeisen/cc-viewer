@@ -9275,6 +9275,11 @@ const i18nData = {
     "tr": "Bu özel uzman silinsin mi?",
     "uk": "Видалити цього користувацького експерта?"
   },
+  // 新建自定义专家时预填进正文文本框的英文外壳骨架。仅 en(纯结构无本地化),其余语言 t() 回落 en;
+  // 发送时 buildCustomTemplate 幂等不重复包壳(见 src/utils/ultraplanTemplates.js)。
+  "ui.ultraplan.customContentTemplate": {
+    "en": "<system-reminder>\n[SCOPED INSTRUCTION] The following instructions apply only to the next 1–3 interactions. Once the task is complete, these instructions should gradually decrease in priority and no longer affect subsequent interactions. You should be adept at utilizing tools such as `AskUserQuestion`, `EnterPlanMode`, and `TeamCreate`, rather than relying solely on plain text processing.\n\n</system-reminder>"
+  },
   "ui.taskNotification.result": {
     "zh": "结果详情",
     "en": "Result details",

@@ -1,15 +1,28 @@
 name: Bump Homebrew Formula
 
-# 触发：本仓库 GitHub Release 被 publish（由 release.yml 在 tag 推送后创建）
-# 备份：手动触发，可显式指定版本号（用于补救 / dry-run）
+# 触发：作为 reusable workflow 被 release.yml 在发版(tag 推送)后链式调用（workflow_call）。
+#   —— 不靠 release:published 事件：由默认 GITHUB_TOKEN 创建的 Release 不会触发其它 workflow（GitHub 防递归），
+#      同一 run 内链式调用可绕开该限制，且无需 PAT。
+# 备份：手动触发，可显式指定版本号（用于补救 / dry-run）。
 on:
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to bump (e.g. 1.6.278)'
+        required: true
+        type: string
+    # 最小权限:只显式接收跨仓写 tap 所需的 HOMEBREW_TAP_TOKEN,不用 secrets: inherit
+    # 把 caller 的全部 secrets(CSC_*/APPLE_* 等)都灌进来。GITHUB_TOKEN 由平台自动提供。
+    secrets:
+      HOMEBREW_TAP_TOKEN:
+        required: true
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to bump (e.g., 1.6.225). Empty = use the latest GitHub release tag.'
-        required: false
+        # required:true 让 UI 在派发前强制填写(本 workflow 无 latest-tag 回落,空值会直接报错)。
+        description: 'Version to bump (e.g., 1.6.225)'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -20,23 +33,18 @@ jobs:
     steps:
       - name: Resolve version
         id: ver
-        # SECURITY: ${{ inputs.version }} / ${{ github.event.release.tag_name }} 必须经 env: 注入,
-        # 不得直接拼进 run: 脚本——后者会让恶意输入（仅 collaborator 可触发，但仍是标准 antipattern）
-        # 在 semver 校验前就被 shell 解释。GitHub 官方 hardening 文档强烈建议这种隔离。
+        # SECURITY: ${{ inputs.version }} 必须经 env: 注入,不得直接拼进 run: 脚本——后者会让恶意输入
+        # （仅 collaborator 可触发，但仍是标准 antipattern）在 semver 校验前就被 shell 解释。
+        # 版本来源统一为 inputs.version（workflow_call 与 workflow_dispatch 共用 inputs 上下文）。
         env:
           INPUT_VERSION: ${{ inputs.version }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          if [[ -n "$INPUT_VERSION" ]]; then
-            VER="$INPUT_VERSION"
-          elif [[ "$EVENT_NAME" == "release" ]]; then
-            VER="${RELEASE_TAG#v}"
-          else
-            echo "Cannot resolve version" >&2
+          if [[ -z "$INPUT_VERSION" ]]; then
+            echo "Cannot resolve version: inputs.version is empty" >&2
             exit 1
           fi
+          VER="${INPUT_VERSION#v}"   # caller 传 github.ref_name=vX.Y.Z 时剥前导 v
           # 校验版本号严格 semver patch 格式（再次防御：确保所有后续步骤拿到的 VER 是干净的）
           if ! [[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Invalid version: $VER" >&2

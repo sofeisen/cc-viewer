@@ -3,7 +3,7 @@
 ## 두 입력 필드의 역할
 
 - **Expert 이름**: UltraPlan 변형 행의 역할 버튼에 표시되는 라벨입니다 (최대 30자). 단순한 표시 이름이며 Claude Code로 **절대** 전송되지 않습니다.
-- **프롬프트 본문**: 작성하시는 역할 지침입니다. 전송 시 cc-viewer가 **자동으로** `<system-reminder>...</system-reminder>` 태그로 감싸고 `[SCOPED INSTRUCTION]` 스코프 헤더를 맨 앞에 추가합니다. 따라서 **본문만 작성**하시면 되며, 직접 `<system-reminder>` 태그를 추가하지 마십시오.
+- **프롬프트 본문**: 작성하시는 역할 지침입니다. 새 expert를 만들면 에디터에 `<system-reminder>...</system-reminder>` 래퍼와 `[SCOPED INSTRUCTION]` 스코프 헤더가 **미리 채워진** 상태로 표시됩니다 — **역할 지침은 래퍼 안에 작성**하십시오. cc-viewer는 이중으로 감싸지 않습니다: 래퍼가 있으면 그대로 전송하고, 제거하면 전송 시 cc-viewer가 다시 하나를 추가합니다.
 
 ---
 
@@ -77,12 +77,12 @@ Your final plan must include the following elements:
 
 ## 섹션별 분석
 
-### 1. `[SCOPED INSTRUCTION]` 스코프 헤더 (래퍼 — 자동 생성)
+### 1. `[SCOPED INSTRUCTION]` 스코프 헤더 (래퍼 — 미리 채워짐)
 > The following instructions are intended for the next 1–3 interactions...
 
 이 줄은 Claude Code에게 **이 지침이 다음 1~3턴의 대화에서만 활성화된다**고 알려주며, 그 이후에는 점차 비활성화됩니다. "expert 페르소나"가 무관한 후속 대화로 새어 나가는 것을 방지합니다.
 
-**이 줄은 cc-viewer가 자동으로 생성하므로 직접 작성할 필요가 없습니다.**
+**이 줄은 에디터에 미리 채워져 있습니다 — 그대로 두십시오. 직접 다시 작성할 필요가 없습니다.**
 
 ### 2. 첫머리 작업 정의 (**가장 다시 작성할 가치가 있는 부분입니다**)
 > Leverage a multi-agent exploration mechanism to formulate an exceptionally detailed implementation plan.
@@ -125,17 +125,19 @@ Research Expert는 6개의 잠재적 역할을 나열합니다 (산업 스카우
 
 ## 작성 팁 (TL;DR)
 
-1. **래퍼는 유지하십시오**: `<system-reminder>` 와 `[SCOPED INSTRUCTION]` 줄은 cc-viewer가 자동으로 추가합니다 — 중복해서 작성하지 마십시오.
-2. **첫 문장을 다시 작성하십시오**: 한 줄로 역할, 목표, 출력 형식을 명시합니다.
-3. **워크플로를 유연하게**: 가벼운 작업에는 1~2단계로 충분하고, 복잡한 작업에서만 5단계 풀 루프를 사용합니다.
-4. **Step 1의 서브 역할을 다시 작성하십시오**: 기본값 (학술 논문 / 경쟁사 / 데모) 은 대개 원하는 것이 아닙니다.
-5. **최종 "산출물 체크리스트"는 품질 기준입니다**: 출력 구조를 명확히 적어 두십시오 — Claude Code는 이를 엄격히 따를 것입니다.
+1. **첫 문장을 다시 작성하십시오**: 한 줄로 역할, 목표, 출력 형식을 명시합니다.
+2. **워크플로를 유연하게**: 가벼운 작업에는 1~2단계로 충분하고, 복잡한 작업에서만 5단계 풀 루프를 사용합니다.
+3. **Step 1의 서브 역할을 다시 작성하십시오**: 기본값 (학술 논문 / 경쟁사 / 데모) 은 대개 원하는 것이 아닙니다.
+4. **최종 "산출물 체크리스트"는 품질 기준입니다**: 출력 구조를 명확히 적어 두십시오 — Claude Code는 이를 엄격히 따를 것입니다.
 
 ---
 
 ## 리팩터링된 예시: Competitive Analyst
 
 ```
+<system-reminder>
+[SCOPED INSTRUCTION] The following instructions apply only to the next 1–3 interactions. Once the task is complete, these instructions should gradually decrease in priority and no longer affect subsequent interactions. You should be adept at utilizing tools such as `AskUserQuestion`, `EnterPlanMode`, and `TeamCreate`, rather than relying solely on plain text processing.
+
 You are a senior competitive intelligence analyst for {industry}. Your goal is to
 produce a decision-grade competitive landscape report for the product "{our product}".
 
@@ -160,6 +162,7 @@ Instructions:
    - Pricing & GTM table
    - Top 3 strategic implications for our product
    - Caveats & data gaps
+</system-reminder>
 ```
 
 원본 Research Expert와 비교하면: 4단계로 축소되었고, 서브 역할은 6개에서 3개로 줄었으며, 산출물 목록은 "보고서 섹션"으로 완전히 다시 작성되었습니다.

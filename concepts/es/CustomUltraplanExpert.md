@@ -3,7 +3,7 @@
 ## Qué hacen los dos campos de entrada
 
 - **Nombre del experto**: la etiqueta mostrada en el botón de rol en la fila de variantes UltraPlan (máx. 30 caracteres). Es solo un nombre de visualización y **nunca** se envía a Claude Code.
-- **Cuerpo del prompt**: tu instrucción de rol. En el momento del envío, cc-viewer lo envuelve **automáticamente** en etiquetas `<system-reminder>...</system-reminder>` con un encabezado de alcance `[SCOPED INSTRUCTION]`. Por lo tanto, **escribe solo el cuerpo** — no añadas tú mismo las etiquetas `<system-reminder>`.
+- **Cuerpo del prompt**: tu instrucción de rol. Al crear un nuevo experto, el editor **viene precargado** con el envoltorio `<system-reminder>...</system-reminder>` y su encabezado de alcance `[SCOPED INSTRUCTION]` — **escribe tu instrucción de rol dentro del envoltorio**. cc-viewer no envuelve dos veces: si el envoltorio está presente, se envía tal cual; si lo quitas, cc-viewer añade uno de nuevo en el momento del envío.
 
 ---
 
@@ -77,12 +77,12 @@ Your final plan must include the following elements:
 
 ## Desglose sección por sección
 
-### 1. Encabezado de alcance `[SCOPED INSTRUCTION]` (envoltorio — generado automáticamente)
+### 1. Encabezado de alcance `[SCOPED INSTRUCTION]` (envoltorio — precargado para ti)
 > The following instructions are intended for the next 1–3 interactions...
 
 Esto le dice a Claude Code: **estas instrucciones solo están activas durante los próximos 1–3 turnos**, luego se desvanecen. Evita que la «persona experta» se filtre posteriormente a una conversación no relacionada.
 
-**Esta línea es generada automáticamente por cc-viewer. No necesitas escribirla.**
+**Esta línea viene precargada en el editor — déjala tal cual; no necesitas reescribirla.**
 
 ### 2. Definición de tarea inicial (**esto es lo que deberías reescribir**)
 > Leverage a multi-agent exploration mechanism to formulate an exceptionally detailed implementation plan.
@@ -125,17 +125,19 @@ La plantilla original enumera 6 elementos de un «plan de implementación». Tu 
 
 ## Consejos de creación (TL;DR)
 
-1. **Mantén el envoltorio**: la línea `<system-reminder>` + `[SCOPED INSTRUCTION]` la añade cc-viewer — no la repitas.
-2. **Reescribe la oración inicial**: indica el rol, el objetivo y el formato de salida en una sola línea.
-3. **Flexibiliza el flujo de trabajo**: 1–2 pasos para tareas ligeras, el ciclo completo de 5 pasos solo para las complejas.
-4. **Reescribe los subroles del Paso 1**: los valores predeterminados (artículos académicos / competidores / demo) probablemente no son lo que quieres.
-5. **La «lista de verificación de entregables» final es tu estándar de calidad**: especifica la estructura de salida — Claude Code la seguirá estrictamente.
+1. **Reescribe la oración inicial**: indica el rol, el objetivo y el formato de salida en una sola línea.
+2. **Flexibiliza el flujo de trabajo**: 1–2 pasos para tareas ligeras, el ciclo completo de 5 pasos solo para las complejas.
+3. **Reescribe los subroles del Paso 1**: los valores predeterminados (artículos académicos / competidores / demo) probablemente no son lo que quieres.
+4. **La «lista de verificación de entregables» final es tu estándar de calidad**: especifica la estructura de salida — Claude Code la seguirá estrictamente.
 
 ---
 
 ## Un ejemplo refactorizado: Analista competitivo
 
 ```
+<system-reminder>
+[SCOPED INSTRUCTION] The following instructions apply only to the next 1–3 interactions. Once the task is complete, these instructions should gradually decrease in priority and no longer affect subsequent interactions. You should be adept at utilizing tools such as `AskUserQuestion`, `EnterPlanMode`, and `TeamCreate`, rather than relying solely on plain text processing.
+
 You are a senior competitive intelligence analyst for {industry}. Your goal is to
 produce a decision-grade competitive landscape report for the product "{our product}".
 
@@ -160,6 +162,7 @@ Instructions:
    - Pricing & GTM table
    - Top 3 strategic implications for our product
    - Caveats & data gaps
+</system-reminder>
 ```
 
 En comparación con el Research Expert original: recortado a 4 pasos, subroles reducidos de 6 a 3, lista de entregables completamente reescrita como «secciones del informe».

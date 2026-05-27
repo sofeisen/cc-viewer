@@ -1,11 +1,78 @@
-.titleRow {
-  display: inline-flex;
+/* 双栏:左文档(滚动) / 右编辑。仅桌面端,宽度由 JSX 的 Modal width 兜底。 */
+.split {
+  display: flex;
+  gap: 20px;
+  align-items: stretch;
+  /* 双栏共享同一高度上限,左右分隔线齐平;左栏内部滚动,右栏 textarea 撑满。 */
+  max-height: 65vh;
+}
+
+.docPanel {
+  flex: 1 1 50%;
+  min-width: 0;
+  overflow-y: auto;
+  padding-right: 14px;
+  border-right: 1px solid var(--border-primary);
+  color: var(--text-primary);
+}
+
+.editPanel {
+  flex: 1 1 50%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 每个代码块外包一层相对定位容器,复制按钮锚定其右上角,
+   不随 pre 横向滚动跑掉。 */
+.codeWrap {
+  position: relative;
+}
+
+/* 给代码块顶部留出空间,使常驻的复制按钮不遮挡第一行代码。 */
+.docPanel .codeWrap pre {
+  padding-top: 32px;
+}
+
+.copyBtn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+  padding: 2px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+  /* 不透明 + 轻微投影:浅色主题下 bg-elevated 与代码块底色接近,靠描边+投影区分。 */
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.copyBtn:hover {
+  border-color: var(--color-primary);
+  color: var(--text-primary);
+}
+
+.docLoading {
+  display: flex;
+  justify-content: center;
   align-items: center;
-  gap: 2px;
+  min-height: 200px;
 }
 
 .field {
   margin-bottom: 12px;
+}
+
+/* 包 textarea 的 field 撑满右栏剩余高度 */
+.fieldGrow {
+  flex: 1;
+  display: flex;
+  margin-bottom: 0;
 }
 
 .titleInput {
@@ -25,6 +92,7 @@
 }
 
 .contentTextarea {
+  flex: 1;
   width: 100%;
   padding: 10px 12px;
   border: 1px solid var(--border-primary);
@@ -34,11 +102,10 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 13px;
   line-height: 1.5;
-  resize: vertical;
+  resize: none;
   outline: none;
   box-sizing: border-box;
-  min-height: 180px;
-  max-height: 50vh;
+  min-height: 220px;
 }
 
 .contentTextarea:focus {

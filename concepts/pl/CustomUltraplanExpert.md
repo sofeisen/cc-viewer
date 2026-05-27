@@ -3,7 +3,7 @@
 ## Co robią dwa pola wejściowe
 
 - **Nazwa eksperta**: etykieta wyświetlana na przycisku roli w wierszu wariantów UltraPlan (maks. 30 znaków). To tylko nazwa wyświetlana i **nigdy** nie jest wysyłana do Claude Code.
-- **Treść promptu**: twoja instrukcja roli. W momencie wysyłania cc-viewer **automatycznie** opakowuje ją w tagi `<system-reminder>...</system-reminder>` z nagłówkiem zakresu `[SCOPED INSTRUCTION]`. Więc **pisz tylko treść** — nie dodawaj samodzielnie tagów `<system-reminder>`.
+- **Treść promptu**: twoja instrukcja roli. Gdy tworzysz nowego eksperta, edytor jest **wstępnie wypełniony** wrapperem `<system-reminder>...</system-reminder>` wraz z nagłówkiem zakresu `[SCOPED INSTRUCTION]` — **pisz swoją instrukcję roli wewnątrz wrappera**. cc-viewer nie opakowuje podwójnie: jeśli wrapper jest obecny, jest wysyłany bez zmian; jeśli go usuniesz, cc-viewer doda go ponownie w momencie wysyłania.
 
 ---
 
@@ -77,12 +77,12 @@ Your final plan must include the following elements:
 
 ## Analiza sekcja po sekcji
 
-### 1. Nagłówek zakresu `[SCOPED INSTRUCTION]` (wrapper — auto-generowany)
+### 1. Nagłówek zakresu `[SCOPED INSTRUCTION]` (wrapper — wstępnie wypełniony dla ciebie)
 > The following instructions are intended for the next 1–3 interactions...
 
 Mówi to Claude Code: **te instrukcje są aktywne tylko przez najbliższe 1–3 tury**, a następnie wygasają. Zapobiega temu, by "persona eksperta" przeciekała do niezwiązanej rozmowy później.
 
-**Ta linia jest generowana przez cc-viewer automatycznie. Nie musisz jej pisać.**
+**Ta linia jest wstępnie wypełniona w edytorze — zostaw ją bez zmian; nie musisz jej przepisywać.**
 
 ### 2. Wstępna definicja zadania (**to jest to, co powinieneś przepisać**)
 > Leverage a multi-agent exploration mechanism to formulate an exceptionally detailed implementation plan.
@@ -125,17 +125,19 @@ Oryginalny szablon wymienia 6 elementów "planu wdrożenia". Twój deliverable m
 
 ## Wskazówki dla autorów (TL;DR)
 
-1. **Zachowaj wrapper**: linia `<system-reminder>` + `[SCOPED INSTRUCTION]` jest dodawana przez cc-viewer — nie powtarzaj.
-2. **Przepisz zdanie otwierające**: określ rolę, cel i format wyjścia w jednej linii.
-3. **Elastycznie kształtuj workflow**: 1–2 kroki dla lekkich zadań, pełna pętla 5-krokowa tylko dla złożonych.
-4. **Przepisz podrole z Kroku 1**: domyślne (artykuły akademickie / konkurenci / demo) prawdopodobnie nie są tym, czego chcesz.
-5. **Końcowa "lista deliverables" to twój próg jakości**: rozpisz strukturę wyjścia — Claude Code będzie ją ściśle przestrzegać.
+1. **Przepisz zdanie otwierające**: określ rolę, cel i format wyjścia w jednej linii.
+2. **Elastycznie kształtuj workflow**: 1–2 kroki dla lekkich zadań, pełna pętla 5-krokowa tylko dla złożonych.
+3. **Przepisz podrole z Kroku 1**: domyślne (artykuły akademickie / konkurenci / demo) prawdopodobnie nie są tym, czego chcesz.
+4. **Końcowa "lista deliverables" to twój próg jakości**: rozpisz strukturę wyjścia — Claude Code będzie ją ściśle przestrzegać.
 
 ---
 
 ## Przerobiony przykład: Competitive Analyst
 
 ```
+<system-reminder>
+[SCOPED INSTRUCTION] The following instructions apply only to the next 1–3 interactions. Once the task is complete, these instructions should gradually decrease in priority and no longer affect subsequent interactions. You should be adept at utilizing tools such as `AskUserQuestion`, `EnterPlanMode`, and `TeamCreate`, rather than relying solely on plain text processing.
+
 You are a senior competitive intelligence analyst for {industry}. Your goal is to
 produce a decision-grade competitive landscape report for the product "{our product}".
 
@@ -160,6 +162,7 @@ Instructions:
    - Pricing & GTM table
    - Top 3 strategic implications for our product
    - Caveats & data gaps
+</system-reminder>
 ```
 
 W porównaniu z oryginalnym Research Expert: przycięte do 4 kroków, podrole zredukowane z 6 do 3, lista deliverables całkowicie przepisana jako "sekcje raportu".
