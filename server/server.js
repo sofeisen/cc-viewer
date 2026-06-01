@@ -700,7 +700,7 @@ async function handleRequest(req, res) {
         const basePath = process.env.CCV_BASE_PATH || '';
         if (basePath && basePath !== '/') {
           const safeBase = basePath.replace(/\/?$/, '/');
-          html = html.replace(/<head[^>]*>/i, m => m + `<base href="${safeBase}"><script>window.__CCV_BASE_PATH__="${safeBase}"</scr" + "ipt>`);
+          html = html.replace(/<head[^>]*>/i, m => m + `<base href="${safeBase}"><script>window.__CCV_BASE_PATH__="${safeBase}"</script>`);
         }
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
         res.end(html);
