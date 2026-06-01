@@ -19,5 +19,7 @@ export function appendToken(url) {
 }
 
 export function apiUrl(path) {
-  return getBasePath() + appendToken(path);
+  const base = getBasePath();
+  const fullPath = base ? base.replace(/\/$/, '') + path : path;
+  return appendToken(fullPath);
 }
