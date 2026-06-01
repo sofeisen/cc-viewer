@@ -642,7 +642,15 @@ async function handleRequest(req, res) {
 
   // 静态文件服务
   if (method === 'GET') {
-    let filePath = url === '/' ? '/index.html' : url;
+    const rawBase = process.env.CCV_BASE_PATH || '';
+    // Normalize to ensure trailing slash; prevents /proxy/ws from
+    // incorrectly matching /proxy/ws-other due to startsWith ambiguity.
+    const basePath = rawBase && rawBase !== '/' ? rawBase.replace(/\/?$/, '/') : '';
+    let filePath = url;
+    if (basePath && url.startsWith(basePath)) {
+      filePath = url.slice(basePath.length) || '/';
+    }
+    if (filePath === '/') filePath = '/index.html';
     // 去掉 query string
     filePath = filePath.split('?')[0];
 
@@ -679,6 +687,13 @@ async function handleRequest(req, res) {
           console.warn('[serveIndexHtml] dist/index.html 没有 <html data-theme="..."> 属性，SSR theme 注入将不生效。检查 index.html 模板。');
         }
         html = html.replace(/<html([^>]*?)data-theme="[^"]*"/, `<html$1data-theme="${themeColor}"`);
+        // 运行时注入 <base> 标签：当 CCV_BASE_PATH 设置为非空非根路径时，
+        // 使浏览器将所有相对 URL 解析到代理子路径下。配合 Vite base='' 输出相对路径。
+        const basePath = process.env.CCV_BASE_PATH || '';
+        if (basePath && basePath !== '/') {
+          const safeBase = basePath.replace(/\/?$/, '/');
+          html = html.replace(/<head[^>]*>/i, m => m + `<base href="${safeBase}">`);
+        }
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
         res.end(html);
         return true;
