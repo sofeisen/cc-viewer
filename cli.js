@@ -1,5 +1,10 @@
 #!/usr/bin/env node
 
+// Windows NTFS + Defender 使每次异步 I/O 开销更大，默认 4 线程不够用
+if (process.platform === 'win32' && !process.env.UV_THREADPOOL_SIZE) {
+  process.env.UV_THREADPOOL_SIZE = '16';
+}
+
 import { readFileSync, writeFileSync, existsSync, realpathSync, unlinkSync, mkdirSync } from 'node:fs';
 import { resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -315,7 +320,7 @@ async function runCliMode(extraClaudeArgs = [], cwd, noOpen = false) {
   // 注册工作区（IM worker 跳过：避免把 IM_<id>/ 目录塞进工作区选择器）
   if (!process.env.CCV_IM_PLATFORM) {
     const { registerWorkspace } = await import('./server/workspace-registry.js');
-    registerWorkspace(workingDir);
+    await registerWorkspace(workingDir);
   }
 
   // 确保 AskUserQuestion hook 已注册到 ~/.claude/settings.json
@@ -480,7 +485,7 @@ async function runSdkMode(extraClaudeArgs = [], cwd, noOpen = false) {
 
   // 注册工作区
   const { registerWorkspace } = await import('./server/workspace-registry.js');
-  registerWorkspace(workingDir);
+  await registerWorkspace(workingDir);
 
   // 不需要 ensureHooks — SDK canUseTool 处理 AskUserQuestion + 权限
   // 不需要 proxy — SDK 直接管理 API 通信

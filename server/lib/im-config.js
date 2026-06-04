@@ -34,7 +34,7 @@ const DESCRIPTORS = {
     allowListField: 'allowStaffIds',
     defaults: {
       enabled: false, appKey: '', appSecret: '', allowStaffIds: [],
-      maxChunkChars: 3800, blockOnSkipPermissions: false,
+      maxChunkChars: 3800, blockOnSkipPermissions: false, ackCard: true, cardTemplateId: '',
     },
     fields: [
       { key: 'enabled', type: 'bool' },
@@ -43,6 +43,8 @@ const DESCRIPTORS = {
       { key: 'allowStaffIds', type: 'idlist' },
       { key: 'maxChunkChars', type: 'chunk' },
       { key: 'blockOnSkipPermissions', type: 'bool' },
+      { key: 'ackCard', type: 'bool', default: true },
+      { key: 'cardTemplateId', type: 'string' },
     ],
   },
   feishu: {
@@ -50,7 +52,7 @@ const DESCRIPTORS = {
     allowListField: 'allowUserIds',
     defaults: {
       enabled: false, appId: '', appSecret: '', region: 'feishu', allowUserIds: [],
-      maxChunkChars: 3800, blockOnSkipPermissions: false,
+      maxChunkChars: 3800, blockOnSkipPermissions: false, ackCard: true,
     },
     fields: [
       { key: 'enabled', type: 'bool' },
@@ -60,6 +62,7 @@ const DESCRIPTORS = {
       { key: 'allowUserIds', type: 'idlist' },
       { key: 'maxChunkChars', type: 'chunk' },
       { key: 'blockOnSkipPermissions', type: 'bool' },
+      { key: 'ackCard', type: 'bool', default: true },
     ],
   },
   wecom: {
@@ -67,7 +70,7 @@ const DESCRIPTORS = {
     allowListField: 'allowUserIds',
     defaults: {
       enabled: false, botId: '', secret: '', allowUserIds: [],
-      maxChunkChars: 3800, blockOnSkipPermissions: false,
+      maxChunkChars: 3800, blockOnSkipPermissions: false, ackCard: true,
     },
     fields: [
       { key: 'enabled', type: 'bool' },
@@ -76,6 +79,7 @@ const DESCRIPTORS = {
       { key: 'allowUserIds', type: 'idlist' },
       { key: 'maxChunkChars', type: 'chunk' },
       { key: 'blockOnSkipPermissions', type: 'bool' },
+      { key: 'ackCard', type: 'bool', default: true },
     ],
   },
   discord: {
@@ -84,7 +88,7 @@ const DESCRIPTORS = {
     defaults: {
       // 1900 < Discord's hard 2000-char/message limit (the adapter also hard-splits as defense).
       enabled: false, botToken: '', allowUserIds: [],
-      maxChunkChars: 1900, blockOnSkipPermissions: false,
+      maxChunkChars: 1900, blockOnSkipPermissions: false, ackCard: true,
     },
     fields: [
       { key: 'enabled', type: 'bool' },
@@ -92,6 +96,7 @@ const DESCRIPTORS = {
       { key: 'allowUserIds', type: 'idlist' },
       { key: 'maxChunkChars', type: 'chunk', default: 1900 }, // < Discord's 2000-char limit
       { key: 'blockOnSkipPermissions', type: 'bool' },
+      { key: 'ackCard', type: 'bool', default: true },
     ],
   },
 };
@@ -155,7 +160,7 @@ function normalizeIdList(v) {
 
 function normField(type, v, dflt) {
   switch (type) {
-    case 'bool': return !!v;
+    case 'bool': return v !== undefined && v !== null ? !!v : (dflt !== undefined ? !!dflt : false);
     case 'cred':
     case 'secret': return typeof v === 'string' ? v.trim() : '';
     case 'idlist': return normalizeIdList(v);
@@ -169,7 +174,7 @@ function decodeField(type, v, dflt) {
   switch (type) {
     case 'cred':
     case 'secret': return decodeSecret(v);
-    case 'bool': return !!v;
+    case 'bool': return v !== undefined && v !== null ? !!v : (dflt !== undefined ? !!dflt : false);
     case 'idlist': return normalizeIdList(v);
     case 'chunk': return clampChunk(v, dflt);
     case 'region': return v === 'lark' ? 'lark' : 'feishu';

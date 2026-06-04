@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.6.295 (2026-06-04)
+
+- perf(win): 异步写入队列替代 interceptor 热路径的 appendFileSync，消除每次 API 请求 50-300ms 的事件循环阻塞
+- perf(win): Atomics.wait 阻塞锁替换为异步文件锁（workspace-registry / ask-store），消除锁重试期间的线程挂起
+- perf(win): Windows 启动时自动设置 UV_THREADPOOL_SIZE=16，缓解 NTFS + Defender 下异步 I/O 线程池饱和
+- perf(win): 日志监听从 watchFile 500ms 轮询迁移至 fs.watch 事件驱动（Windows 走 ReadDirectoryChangesW），消除 stat 风暴；同目录多文件共享单个 watcher；80ms 防抖；5s 安全网兜底；CCV_FORCE_POLL=1 可回退
+- feat: CCV_SYNC_WRITES=1 环境变量回退开关，可随时切回同步模式排查问题
+- feat(im): IM 即时确认——收到消息后第一时间发送状态反馈；飞书/Discord 以可更新卡片呈现（完成后原地更新为回复），钉钉配置卡片模板后支持互动卡片（未配置则文本确认），企微降级为文本确认；超时路径补充回复通知；各平台设置新增「即时确认」开关
+- feat(im): 排队消息告知前方等待数量和队列上限（busyQueued / queueFull 含 {ahead}/{max}）
+- perf(im): IM worker 的 turn_end 去抖从 10s 降至 200ms——消除队列消息间的无谓等待，回复延迟大幅降低
+- fix(im): turn_end 检测双保险——主信号为 Stop hook（200ms 去抖），备用为 idle 轮询（streaming 停止 15s 后主动触发），超时兜底从 10 分钟缩至 2 分钟；防止 Stop hook 漏触发导致队列卡死
+
 ## 1.6.294 (2026-06-03)
 
 - feat(electron/win): Windows 桌面版自定义标题栏——隐藏原生白色标题栏与菜单栏（快捷键保留），logo、标题、File/Edit/View/Window 菜单与项目 tabs 合并为一行；原生 最小化/最大化/关闭 按钮经 titleBarOverlay 保留（Win11 Snap Layouts、双击最大化不受影响）且配色随皮肤实时切换；菜单为跟随皮肤的 HTML 下拉，文案补 18 语言（macOS 原生菜单同步获得翻译）

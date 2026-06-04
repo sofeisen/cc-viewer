@@ -29,6 +29,16 @@ export const dingtalkDescriptor = {
       labelKey: 'ui.dingtalk.blockSkipPerm', fallback: 'Block injection in skip-permissions sessions',
       helpKey: 'ui.dingtalk.blockSkipPermHelp', helpFallback: 'When the Claude session runs with --dangerously-skip-permissions, refuse remote injection (which would execute with no approval).',
     },
+    {
+      key: 'ackCard', type: 'switch', section: 'more',
+      labelKey: 'ui.im.ackCard', fallback: 'Instant acknowledgment',
+      helpKey: 'ui.im.ackCardHelp', helpFallback: 'Send immediate status feedback when a message is received; update in-place when the reply is ready.',
+    },
+    {
+      key: 'cardTemplateId', type: 'text', section: 'more', optional: true,
+      labelKey: 'ui.dingtalk.cardTemplateId', fallback: 'Card Template ID',
+      helpKey: 'ui.dingtalk.cardTemplateIdHelp', helpFallback: 'Interactive Card template ID from the DingTalk Open Platform (optional — leave empty for plain-text acknowledgment).',
+    },
   ],
   notes: [],
 };
@@ -63,6 +73,11 @@ export const feishuDescriptor = {
       labelKey: 'ui.im.blockSkipPerm', fallback: 'Block injection in skip-permissions sessions',
       helpKey: 'ui.im.blockSkipPermHelp', helpFallback: 'When the Claude session runs with --dangerously-skip-permissions, refuse remote injection (which would execute with no approval).',
     },
+    {
+      key: 'ackCard', type: 'switch', section: 'more',
+      labelKey: 'ui.im.ackCard', fallback: 'Instant acknowledgment',
+      helpKey: 'ui.im.ackCardHelp', helpFallback: 'Send immediate status feedback when a message is received; update in-place when the reply is ready.',
+    },
   ],
   notes: [
     { kind: 'hint', key: 'ui.feishu.provisioningHelp', fallback: 'In the Feishu/Lark console: create a custom app, set Event Subscription to long-connection, subscribe im.message.receive_v1, grant the im:message scope, publish the app, then add the bot to a chat.' },
@@ -91,6 +106,11 @@ export const wecomDescriptor = {
       labelKey: 'ui.im.blockSkipPerm', fallback: 'Block injection in skip-permissions sessions',
       helpKey: 'ui.im.blockSkipPermHelp', helpFallback: 'When the Claude session runs with --dangerously-skip-permissions, refuse remote injection (which would execute with no approval).',
     },
+    {
+      key: 'ackCard', type: 'switch', section: 'more',
+      labelKey: 'ui.im.ackCard', fallback: 'Instant acknowledgment',
+      helpKey: 'ui.im.ackCardHelp', helpFallback: 'Send immediate status feedback when a message is received; update in-place when the reply is ready.',
+    },
   ],
   notes: [
     { kind: 'hint', key: 'ui.wecom.provisioningHelp', fallback: 'In the WeCom console: create a Smart Robot, set its API receive mode to long-connection, copy the Bot ID + Secret, then add the bot to a chat.' },
@@ -117,6 +137,11 @@ export const discordDescriptor = {
       key: 'blockOnSkipPermissions', type: 'switch', section: 'more',
       labelKey: 'ui.im.blockSkipPerm', fallback: 'Block injection in skip-permissions sessions',
       helpKey: 'ui.im.blockSkipPermHelp', helpFallback: 'When the Claude session runs with --dangerously-skip-permissions, refuse remote injection (which would execute with no approval).',
+    },
+    {
+      key: 'ackCard', type: 'switch', section: 'more',
+      labelKey: 'ui.im.ackCard', fallback: 'Instant acknowledgment',
+      helpKey: 'ui.im.ackCardHelp', helpFallback: 'Send immediate status feedback when a message is received; update in-place when the reply is ready.',
     },
   ],
   notes: [

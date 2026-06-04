@@ -18,6 +18,9 @@ const rootDir = join(__dirname, '..');
 const importAbs = (p) => import(pathToFileURL(p).href);
 
 // Set env BEFORE any imports of server.js / interceptor.js
+if (process.platform === 'win32' && !process.env.UV_THREADPOOL_SIZE) {
+  process.env.UV_THREADPOOL_SIZE = '16';
+}
 process.env.CCV_CLI_MODE = '1';
 process.env.CCV_WORKSPACE_MODE = '1';
 process.env.CCV_START_PORT = process.env.CCV_START_PORT || '7048';

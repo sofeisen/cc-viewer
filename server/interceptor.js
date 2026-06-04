@@ -8,6 +8,7 @@ const _ccvSkip = _ccvSkipArgs.includes(process.argv[2]);
 
 import './lib/proxy-env.js';
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync, statSync, unlinkSync, existsSync, watchFile } from 'node:fs';
+import { AsyncWriteQueue } from './lib/async-write-queue.js';
 import { renameSyncWithRetry } from './lib/file-api.js';
 import http from 'node:http';
 import https from 'node:https';
@@ -322,6 +323,9 @@ if (process.env.CCV_WORKSPACE_MODE === '1') {
 }
 let LOG_FILE = _newLogFile;
 
+// 异步写入队列 — 替代 appendFileSync，避免阻塞事件循环（Windows NTFS 尤为严重）
+const _writeQueue = new AsyncWriteQueue(() => LOG_FILE);
+
 // 现在 _projectName/_logDir 已初始化，可以安全加载 proxy profile（含 workspace override）
 // 并挂载 watchFile 同步列表变化。
 _loadProxyProfile();
@@ -405,12 +409,13 @@ export function resetWorkspace() {
 
 const MAX_LOG_SIZE = 300 * 1024 * 1024; // 300MB
 
-function checkAndRotateLogFile() {
+async function checkAndRotateLogFile() {
   // Teammate 不做日志轮转，由 leader 负责
   if (_isTeammate) return;
   try {
     if (!existsSync(LOG_FILE) || statSync(LOG_FILE).size < MAX_LOG_SIZE) return;
   } catch { return; }
+  await _writeQueue.flush();
   const { filePath } = generateNewLogFilePath();
   const result = rotateLogFile(LOG_FILE, filePath, MAX_LOG_SIZE);
   if (result.rotated) {
@@ -507,15 +512,15 @@ export function setupInterceptor() {
   };
 
   process.on('SIGINT', () => {
-    cleanupViewer().finally(() => process.exit(0));
+    _writeQueue.close().then(() => cleanupViewer()).finally(() => process.exit(0));
   });
 
   process.on('SIGTERM', () => {
-    cleanupViewer().finally(() => process.exit(0));
+    _writeQueue.close().then(() => cleanupViewer()).finally(() => process.exit(0));
   });
 
   process.on('beforeExit', () => {
-    cleanupViewer();
+    _writeQueue.close().then(() => cleanupViewer());
   });
 
   const _originalFetch = globalThis.fetch;
@@ -627,7 +632,7 @@ export function setupInterceptor() {
 
     // 用户新指令边界：检查日志文件大小，超过 250MB 则切换新文件
     if (requestEntry?.mainAgent) {
-      checkAndRotateLogFile();
+      await checkAndRotateLogFile();
       // 仅 mainAgent 请求时缓存模型名，避免 SubAgent 覆盖
       if (requestEntry.body?.model && typeof requestEntry.body.model === 'string') {
         _cachedModel = requestEntry.body.model;
@@ -719,9 +724,7 @@ export function setupInterceptor() {
     if (requestEntry) {
       const willLiveStream = !!_livePort && requestEntry.mainAgent && !_isTeammate;
       if (!willLiveStream) {
-        try {
-          appendFileSync(LOG_FILE, JSON.stringify(requestEntry) + '\n---\n');
-        } catch { }
+        _writeQueue.append(JSON.stringify(requestEntry) + '\n---\n');
       }
     }
 
@@ -924,8 +927,8 @@ export function setupInterceptor() {
                       // 移除在途请求标记，保持原始报文
                       delete requestEntry.inProgress;
                       delete requestEntry.requestId;
-                      appendFileSync(LOG_FILE, JSON.stringify(requestEntry) + '\n---\n');
-                      _commitDeltaState(_deltaOriginalMessagesLength, _deltaOriginalTailFp);
+                      { const _dl = _deltaOriginalMessagesLength, _tf = _deltaOriginalTailFp;
+                        _writeQueue.append(JSON.stringify(requestEntry) + '\n---\n', () => _commitDeltaState(_dl, _tf)); }
                       // Release memory: clear large objects after disk write
                       streamedChunks = [];
                       streamedContentLen = 0;
@@ -935,8 +938,8 @@ export function setupInterceptor() {
                       requestEntry.response.body = fullContent.slice(0, 1000);
                       delete requestEntry.inProgress;
                       delete requestEntry.requestId;
-                      appendFileSync(LOG_FILE, JSON.stringify(requestEntry) + '\n---\n');
-                      _commitDeltaState(_deltaOriginalMessagesLength, _deltaOriginalTailFp);
+                      { const _dl = _deltaOriginalMessagesLength, _tf = _deltaOriginalTailFp;
+                        _writeQueue.append(JSON.stringify(requestEntry) + '\n---\n', () => _commitDeltaState(_dl, _tf)); }
                       streamedChunks = [];
                       streamedContentLen = 0;
                       requestEntry.response = null;
@@ -1005,8 +1008,8 @@ export function setupInterceptor() {
           };
           delete requestEntry.inProgress;
           delete requestEntry.requestId;
-          appendFileSync(LOG_FILE, JSON.stringify(requestEntry) + '\n---\n');
-          _commitDeltaState(_deltaOriginalMessagesLength, _deltaOriginalTailFp);
+          { const _dl = _deltaOriginalMessagesLength, _tf = _deltaOriginalTailFp;
+            _writeQueue.append(JSON.stringify(requestEntry) + '\n---\n', () => _commitDeltaState(_dl, _tf)); }
           resetStreamingState();
         }
       } else {
@@ -1033,13 +1036,13 @@ export function setupInterceptor() {
           delete requestEntry.inProgress;
           delete requestEntry.requestId;
 
-          appendFileSync(LOG_FILE, JSON.stringify(requestEntry) + '\n---\n');
-          _commitDeltaState(_deltaOriginalMessagesLength, _deltaOriginalTailFp);
+          { const _dl = _deltaOriginalMessagesLength, _tf = _deltaOriginalTailFp;
+            _writeQueue.append(JSON.stringify(requestEntry) + '\n---\n', () => _commitDeltaState(_dl, _tf)); }
         } catch (err) {
           delete requestEntry.inProgress;
           delete requestEntry.requestId;
-          appendFileSync(LOG_FILE, JSON.stringify(requestEntry) + '\n---\n');
-          _commitDeltaState(_deltaOriginalMessagesLength, _deltaOriginalTailFp);
+          { const _dl = _deltaOriginalMessagesLength, _tf = _deltaOriginalTailFp;
+            _writeQueue.append(JSON.stringify(requestEntry) + '\n---\n', () => _commitDeltaState(_dl, _tf)); }
         }
       }
     }

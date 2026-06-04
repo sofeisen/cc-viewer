@@ -1,6 +1,7 @@
 // Workspace Registry - 工作区持久化管理
-import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, readdirSync, openSync, closeSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, readdirSync, unlinkSync } from 'node:fs';
 import { renameSyncWithRetry } from './lib/file-api.js';
+import { withFileLockAsync } from './lib/async-file-lock.js';
 import { join, basename, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { LOG_DIR } from '../findcc.js';
@@ -8,51 +9,6 @@ import { LOG_DIR } from '../findcc.js';
 // 动态获取（LOG_DIR 可能在运行时被 setLogDir 修改）
 function getWorkspacesFile() { return join(LOG_DIR, 'workspaces.json'); }
 function getLockFile() { return join(LOG_DIR, 'workspaces.lock'); }
-
-function sleep(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-function withLock(fn) {
-  mkdirSync(LOG_DIR, { recursive: true });
-  const deadline = Date.now() + 2000;
-  // 如果锁文件超过 5 秒未更新，认为它是死锁（前一个进程崩溃）
-  const STALE_THRESHOLD = 5000;
-
-  while (true) {
-    try {
-      const fd = openSync(getLockFile(), 'wx');
-      closeSync(fd);
-      break;
-    } catch (err) {
-      if (err?.code === 'EEXIST') {
-        if (Date.now() < deadline) {
-          // 检查是否为陈旧锁
-          try {
-            const stats = statSync(getLockFile());
-            if (Date.now() - stats.mtimeMs > STALE_THRESHOLD) {
-              // 尝试强制移除锁
-              try { unlinkSync(getLockFile()); } catch { }
-              // 立即重试获取
-              continue;
-            }
-          } catch {
-            // stat 失败可能意味着锁刚被释放，继续循环尝试获取
-          }
-          sleep(25);
-          continue;
-        }
-      }
-      throw err;
-    }
-  }
-
-  try {
-    return fn();
-  } finally {
-    try { unlinkSync(getLockFile()); } catch { }
-  }
-}
 
 export function loadWorkspaces() {
   try {
@@ -69,7 +25,7 @@ export function saveWorkspaces(list) {
   try {
     mkdirSync(LOG_DIR, { recursive: true });
     writeFileSync(tmpFile, JSON.stringify({ workspaces: list }, null, 2));
-    
+
     // Windows 上 renameSync 可能会因为目标文件存在或被占用而失败。统一走 server/lib/file-api.js
     // renameSyncWithRetry helper（同款重试策略，跟 interceptor / log-management 一致）。
     renameSyncWithRetry(tmpFile, getWorkspacesFile());
@@ -87,8 +43,8 @@ function _invalidatePolicyCache() {
     .catch(() => { /* policy 模块可能在某些 entry 下未加载,无副作用即可 */ });
 }
 
-export function registerWorkspace(absolutePath) {
-  const result = withLock(() => {
+export async function registerWorkspace(absolutePath) {
+  const result = await withFileLockAsync(getLockFile(), () => {
     const resolvedPath = resolve(absolutePath);
     const projectName = basename(resolvedPath).replace(/[^a-zA-Z0-9_\-\.]/g, '_');
     const list = loadWorkspaces();
@@ -113,13 +69,13 @@ export function registerWorkspace(absolutePath) {
     list.push(entry);
     saveWorkspaces(list);
     return entry;
-  });
+  }, { ensureDir: LOG_DIR });
   _invalidatePolicyCache();
   return result;
 }
 
-export function removeWorkspace(id) {
-  const result = withLock(() => {
+export async function removeWorkspace(id) {
+  const result = await withFileLockAsync(getLockFile(), () => {
     const list = loadWorkspaces();
     const filtered = list.filter(w => w.id !== id);
     if (filtered.length !== list.length) {
@@ -127,7 +83,7 @@ export function removeWorkspace(id) {
       return true;
     }
     return false;
-  });
+  }, { ensureDir: LOG_DIR });
   if (result) _invalidatePolicyCache();
   return result;
 }

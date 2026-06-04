@@ -169,7 +169,7 @@ describe('AskUserQuestion 无超时/无降级 不变量', () => {
 
   it('lib/ask-store.js 必须导出 consumeIfFinal（防 GET handler 退回到 race-prone 的 consume+setEntry）', () => {
     const src = readSource('server/lib/ask-store.js');
-    assert.ok(/export\s+function\s+consumeIfFinal\b/.test(src), 'consumeIfFinal 必须 export（GET handler 依赖它消除写后读 race）');
+    assert.ok(/export\s+(async\s+)?function\s+consumeIfFinal\b/.test(src), 'consumeIfFinal 必须 export（GET handler 依赖它消除写后读 race）');
   });
 
   it('server.js GET /api/ask-hook/:id/result 端点存在（短轮询协议核心）', () => {

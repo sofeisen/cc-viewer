@@ -2,6 +2,7 @@
 // orchestration (dedup, access control, queue, inject, chunk, turn-end reply) lives in
 // server/lib/im-bridge-core.js; this module only knows DingTalk's Stream client, ACK protocol,
 // inbound payload shape, access-token fetch, and proactive App API send endpoints.
+import { randomUUID } from 'node:crypto';
 import { registerAdapter } from '../im-bridge-core.js';
 import { t } from '../../i18n.js';
 
@@ -13,6 +14,8 @@ export function __setClientFactory(fn) { clientFactory = fn; }
 const TOKEN_URL = 'https://api.dingtalk.com/v1.0/oauth2/accessToken';
 const GROUP_SEND_URL = 'https://api.dingtalk.com/v1.0/robot/groupMessages/send';
 const OTO_SEND_URL = 'https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend';
+const CARD_CREATE_URL = 'https://api.dingtalk.com/v1.0/card/instances';
+const CARD_DELIVER_URL = 'https://api.dingtalk.com/v1.0/card/instances/deliver';
 
 async function getAccessToken(cfg, ctx) {
   const tc = ctx.store.tokenCache;
@@ -119,6 +122,65 @@ const dingtalkAdapter = {
   // 没有通讯录读取权限，调用必失败（errcode 60121/88）；且这些未授权调用会打到与消息发送同一个 appKey，
   // 触发钉钉风控/限流，反过来阻断模型回复的下发。故 DingTalk 发送者头像在「对话记录」里降级为默认头像
   // （名字仍是真实昵称，不报错、不抢占发送配额）。后续如引入具备通讯录 scope 的凭证再补 resolveSender。
+
+  async sendAckCard(cfg, target, statusText, ctx) {
+    if (!cfg.cardTemplateId) return null;
+    const token = await getAccessToken(cfg, ctx);
+    const outTrackId = randomUUID();
+    const headers = { 'Content-Type': 'application/json', 'x-acs-dingtalk-access-token': token };
+
+    const cr = await ctx.fetch(CARD_CREATE_URL, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        outTrackId,
+        cardTemplateId: cfg.cardTemplateId,
+        cardData: { cardParamMap: { status: statusText, content: '' } },
+      }),
+    });
+    if (!cr.ok) { const j = await cr.json().catch(() => ({})); throw new Error(`card create ${cr.status}: ${j.message || j.code || 'failed'}`); }
+
+    const isGroup = String(target.conversationType) === '2';
+    const deliverBody = isGroup
+      ? {
+          outTrackId,
+          userIdType: 1,
+          openSpaceId: 'dtv1.card//IM_GROUP.' + target.conversationId,
+          imGroupOpenDeliverModel: { robotCode: target.robotCode },
+        }
+      : {
+          outTrackId,
+          userIdType: 1,
+          openSpaceId: 'dtv1.card//IM_ROBOT.' + target.senderStaffId,
+          imRobotOpenDeliverModel: { spaceType: 'IM_ROBOT', robotCode: target.robotCode },
+        };
+
+    const dr = await ctx.fetch(CARD_DELIVER_URL, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(deliverBody),
+    });
+    if (!dr.ok) { const j = await dr.json().catch(() => ({})); throw new Error(`card deliver ${dr.status}: ${j.message || j.code || 'failed'}`); }
+
+    return { outTrackId };
+  },
+
+  async updateAckCard(cfg, target, handle, content, status, ctx) {
+    try {
+      const token = await getAccessToken(cfg, ctx);
+      const r = await ctx.fetch(CARD_CREATE_URL, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'x-acs-dingtalk-access-token': token },
+        body: JSON.stringify({
+          outTrackId: handle.outTrackId,
+          cardData: { cardParamMap: { status: '', content } },
+        }),
+      });
+      return r.ok;
+    } catch {
+      return false;
+    }
+  },
 
   async testConnection(cfg, ctx) {
     try {

@@ -223,7 +223,7 @@ function askHook(req, res, parsedUrl, isLocal, deps) {
 // Phase 3: short-poll handoff endpoint. ask-bridge GET /api/ask-hook/:id/result?wait=30000
 // 在 wait ms 内若答案/cancel 到达 → 立即返；否则返 204 让 client 重发。
 // 内存有 entry → 注册 listener；内存无 → 查 disk consume（server 重启场景）。
-function askHookResult(req, res, parsedUrl, isLocal, deps) {
+async function askHookResult(req, res, parsedUrl, isLocal, deps) {
   const url = parsedUrl.pathname;
   try {
     // URL 形如 /api/ask-hook/<id>/result?wait=30000；id 受白名单约束（与 POST 同源）
@@ -242,7 +242,7 @@ function askHookResult(req, res, parsedUrl, isLocal, deps) {
     // 用 consumeIfFinal 单次 withLock 内判 status 决定是否 delete —— 旧设计的
     // "consume + 若 pending 再 setEntry 写回" 两段是 race window：中间被 markAnswered 命中后，
     // setEntry 走 status guard 已经不会覆盖；但不删的 pending 也无须重写一遍。
-    const diskEntry = askStoreConsumeIfFinal(id);
+    const diskEntry = await askStoreConsumeIfFinal(id);
     if (diskEntry && diskEntry.status === 'answered') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ answers: diskEntry.answers || {} }));

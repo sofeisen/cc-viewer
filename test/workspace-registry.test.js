@@ -13,7 +13,7 @@ function spawnRegister(path) {
   const moduleUrl = new URL('../server/workspace-registry.js', import.meta.url).href;
   const script = `
     import { registerWorkspace } from ${JSON.stringify(moduleUrl)};
-    registerWorkspace(process.argv[1]);
+    await registerWorkspace(process.argv[1]);
   `;
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['--input-type=module', '-e', script, path], {
@@ -40,10 +40,10 @@ describe('workspace-registry', () => {
     assert.deepStrictEqual(loadWorkspaces(), []);
   });
 
-  it('registers a workspace and sanitizes projectName', () => {
+  it('registers a workspace and sanitizes projectName', async () => {
     const wsDir = join(tmpdir(), `ccv-ws-${Date.now()}-my project!`);
     mkdirSync(wsDir, { recursive: true });
-    const entry = registerWorkspace(wsDir);
+    const entry = await registerWorkspace(wsDir);
     assert.equal(entry.path, wsDir);
     assert.equal(entry.projectName, wsDir.split('/').pop().replace(/[^a-zA-Z0-9_\-\.]/g, '_'));
     const list = loadWorkspaces();
@@ -54,26 +54,26 @@ describe('workspace-registry', () => {
   it('does not duplicate when registering same path twice', async () => {
     const wsDir = join(tmpdir(), `ccv-ws-${Date.now()}-dup`);
     mkdirSync(wsDir, { recursive: true });
-    const first = registerWorkspace(wsDir);
+    const first = await registerWorkspace(wsDir);
     await new Promise(r => setTimeout(r, 10));
-    const second = registerWorkspace(wsDir);
+    const second = await registerWorkspace(wsDir);
     assert.equal(first.id, second.id);
     const list = loadWorkspaces();
     assert.equal(list.length, 1);
   });
 
-  it('removes workspace by id', () => {
+  it('removes workspace by id', async () => {
     const wsDir = join(tmpdir(), `ccv-ws-${Date.now()}-rm`);
     mkdirSync(wsDir, { recursive: true });
-    const entry = registerWorkspace(wsDir);
-    assert.equal(removeWorkspace(entry.id), true);
+    const entry = await registerWorkspace(wsDir);
+    assert.equal(await removeWorkspace(entry.id), true);
     assert.deepStrictEqual(loadWorkspaces(), []);
   });
 
-  it('enriches logCount and totalSize in getWorkspaces', () => {
+  it('enriches logCount and totalSize in getWorkspaces', async () => {
     const wsDir = join(tmpdir(), `ccv-ws-${Date.now()}-logs`);
     mkdirSync(wsDir, { recursive: true });
-    const entry = registerWorkspace(wsDir);
+    const entry = await registerWorkspace(wsDir);
     const projectDir = join(LOG_DIR, entry.projectName);
     mkdirSync(projectDir, { recursive: true });
     writeFileSync(join(projectDir, `${entry.projectName}_a.jsonl`), '{"a":1}\n');
@@ -99,7 +99,7 @@ describe('workspace-registry', () => {
     assert.ok(paths.includes(wsB));
   });
 
-  it('recovers from stale lock', () => {
+  it('recovers from stale lock', async () => {
     // Manually create a lock file with old mtime
     const LOCK_FILE = join(LOG_DIR, 'workspaces.lock');
     const oldTime = new Date(Date.now() - 10000);
@@ -111,7 +111,7 @@ describe('workspace-registry', () => {
     mkdirSync(wsDir, { recursive: true });
 
     // This will throw if lock is not cleared
-    const entry = registerWorkspace(wsDir);
+    const entry = await registerWorkspace(wsDir);
     assert.ok(entry);
     assert.ok(!existsSync(LOCK_FILE)); // Lock should be gone after operation
   });

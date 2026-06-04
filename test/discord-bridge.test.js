@@ -25,8 +25,8 @@ class FakeClient extends EventEmitter {
     return Promise.resolve(token);
   }
   destroy() { rec.destroyed = true; return Promise.resolve(); }
-  get channels() { return { fetch: async (id) => { rec.channelsFetch.push(id); return { send: async (c) => rec.sends.push({ via: 'channel', id, content: c }) }; } }; }
-  get users() { return { fetch: async (id) => { rec.usersFetch.push(id); return { createDM: async () => ({ send: async (c) => rec.sends.push({ via: 'dm', id, content: c }) }) }; } }; }
+  get channels() { return { fetch: async (id) => { rec.channelsFetch.push(id); return { send: async (c) => { rec.sends.push({ via: 'channel', id, content: c }); return { id: 'mock-msg-' + rec.sends.length }; } }; } }; }
+  get users() { return { fetch: async (id) => { rec.usersFetch.push(id); return { createDM: async () => ({ send: async (c) => { rec.sends.push({ via: 'dm', id, content: c }); return { id: 'mock-msg-' + rec.sends.length }; } }) }; } }; }
 }
 function installFakeSdk() {
   discord.__setClientFactory(() => ({
@@ -145,9 +145,9 @@ describe('discord outbound', () => {
 
   it('replies to a DM via users.fetch().createDM() — NOT channels.fetch (the #9624 path)', async () => {
     receive({ authorId: 'bob', content: 'hi' }); // DM (no guild)
-    await tick();
+    await tick(); await tick();
     await core.notifyTurnEnd('s', Date.now(), writeTranscript('dm answer'));
-    assert.deepEqual(rec.usersFetch, ['bob']);
+    assert.ok(rec.usersFetch.length > 0 && rec.usersFetch.every((u) => u === 'bob'), 'all usersFetch must be for bob');
     assert.equal(rec.channelsFetch.length, 0, 'must not channels.fetch a DM');
     assert.equal(rec.sends.at(-1).via, 'dm');
     assert.match(rec.sends.at(-1).content, /dm answer/);
@@ -155,9 +155,9 @@ describe('discord outbound', () => {
 
   it('replies to a guild channel via channels.fetch()', async () => {
     receive({ guild: { id: 'g1' }, channelId: 'chan9', content: 'hi' });
-    await tick();
+    await tick(); await tick();
     await core.notifyTurnEnd('s', Date.now(), writeTranscript('guild answer'));
-    assert.deepEqual(rec.channelsFetch, ['chan9']);
+    assert.ok(rec.channelsFetch.length > 0 && rec.channelsFetch.every((c) => c === 'chan9'), 'all channelsFetch must be for chan9');
     assert.equal(rec.sends.at(-1).via, 'channel');
   });
 });

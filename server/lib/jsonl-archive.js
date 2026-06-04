@@ -20,7 +20,6 @@ const CACHE_TTL_MS = 7 * 24 * 3600 * 1000;
 const ARCHIVE_MAX_BYTES = 400 * 1024 * 1024;
 
 function syncSleep(ms) {
-  // Atomics.wait 在主线程上真睡眠（不像 busy-wait 占满 CPU 或阻塞 event-loop heuristics）
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 

@@ -203,7 +203,8 @@ describe('outbound on turn_end', () => {
       { type: 'assistant', message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'x' }, { type: 'text', text: 'Hello back' }] } },
     ]);
     await notifyTurnEnd('s1', Date.now(), tp);
-    const send = fetches.find((f) => f.url.includes('oToMessages/batchSend'));
+    const sends = fetches.filter((f) => f.url.includes('oToMessages/batchSend'));
+    const send = sends.at(-1);
     assert.ok(send, 'should send via 1:1 App API');
     const param = JSON.parse(send.body.msgParam);
     assert.match(param.text, /Hello back/);
@@ -222,8 +223,8 @@ describe('outbound on turn_end', () => {
     const ts = Date.now();
     await notifyTurnEnd('s1', ts, tp);
     await notifyTurnEnd('s1', ts, tp); // doubled delivery of the same turn
-    const count = fetches.filter((f) => f.url.includes('/robot/')).length;
-    assert.equal(count, 1, 'doubled turn_end must not resend');
+    const replyCount = fetches.filter((f) => f.url.includes('/robot/') && /same/.test(JSON.parse(f.body.msgParam).text)).length;
+    assert.equal(replyCount, 1, 'doubled turn_end must not resend');
   });
 
   // P2-1 regression: the old text-signature guard wrongly swallowed a later turn whose reply
@@ -296,7 +297,7 @@ describe('review fixes (P1/P2)', () => {
     skipPerm = true; cfg.blockOnSkipPermissions = false;
     await inbound({ msgId: 'm1', content: 'go' });
     assert.deepEqual(calls.writeSeq[0], PASTE(MARK('go'))); // warn branch distinguished by injection happening
-    await tick();
+    await tick(); await tick();
     assert.match(lastText(), /收到，正在思考|Got it, thinking/);
   });
 
@@ -321,10 +322,13 @@ describe('review fixes (P1/P2)', () => {
     cfg.maxChunkChars = 500;
     const longText = Array.from({ length: 12 }, (_, i) => `para ${i} ` + 'y'.repeat(400)).join('\n\n');
     await inbound({ msgId: 'm1', content: 'hi' });
+    await tick(); // let the ack card promise settle
+    const ackSends = fetches.filter((f) => f.url.includes('oToMessages/batchSend')).length;
     await notifyTurnEnd('s1', Date.now(), writeTp(longText));
-    const sends = fetches.filter((f) => f.url.includes('oToMessages/batchSend'));
-    assert.equal(sends.length, 5, 'no more than MAX_CHUNKS_PER_TURN chunks');
-    assert.match(JSON.parse(sends.at(-1).body.msgParam).text, /截断|truncated/);
+    const allSends = fetches.filter((f) => f.url.includes('oToMessages/batchSend'));
+    const replySends = allSends.slice(ackSends);
+    assert.equal(replySends.length, 5, 'no more than MAX_CHUNKS_PER_TURN chunks');
+    assert.match(JSON.parse(replySends.at(-1).body.msgParam).text, /截断|truncated/);
   });
 });
 
@@ -391,8 +395,10 @@ describe('system-message i18n follows configured language', () => {
     setLang(lang);
     await inbound({ msgId: 'a1', content: 'first' });   // injected, turn in flight
     await inbound({ msgId: 'a2', content: 'second' });   // queued → busyQueued reply
-    await tick();
-    const send = fetches.find((f) => f.url.includes('oToMessages/batchSend'));
+    await tick(); await tick();
+    // Skip the ack message (ackProcessing); the busyQueued reply is the second batchSend.
+    const sends = fetches.filter((f) => f.url.includes('oToMessages/batchSend'));
+    const send = sends.find((f) => /busy|排队|忙/.test(JSON.parse(f.body.msgParam).text));
     assert.ok(send, 'busyQueued should be sent to the 1:1 conversation');
     return JSON.parse(send.body.msgParam).text;
   }

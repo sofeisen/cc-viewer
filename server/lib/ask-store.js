@@ -9,10 +9,11 @@
 // - 启动时 hydrate 出的 entry 的 res 字段为 null（旧连接已死），
 //   等待新的 ask-bridge 重新 POST 同 toolUseId 时复用（已在 server.js:2727 实现）
 //   或浏览器通过 /api/pending-asks 拉取展示。
-import { readFileSync, writeFileSync, writeSync, existsSync, mkdirSync, statSync, openSync, closeSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { renameSyncWithRetry } from './file-api.js';
+import { withFileLockAsync } from './async-file-lock.js';
 import { LOG_DIR } from '../../findcc.js';
 
 const SCHEMA_VERSION = 1;
@@ -24,80 +25,8 @@ let _loggedPersistError = false;
 function getStoreFile() { return join(LOG_DIR, 'ask-store.json'); }
 function getLockFile() { return join(LOG_DIR, 'ask-store.lock'); }
 
-function sleep(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-// Lock body 含 owner pid，让其它进程精确判断 owner 是否仍活着 —— 避免 mtime-only stale
-// 判定在 Electron 多 Tab + 慢盘场景下误删活跃锁（持锁方 fn 跑 >5s 时旧实现会被偷锁）。
-// Body 不可读（老格式 / openSync 与 writeSync 之间的瞬间 race）时退回 mtime 阈值兜底。
-function readLockOwnerPid(path) {
-  try {
-    const raw = readFileSync(path, 'utf-8');
-    if (!raw) return null;
-    const obj = JSON.parse(raw);
-    if (obj && Number.isInteger(obj.pid)) return obj.pid;
-  } catch {}
-  return null;
-}
-
-function isPidAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    // ESRCH = 进程不存在；EPERM = 存在但不同 user（仍算活）
-    return err && err.code === 'EPERM';
-  }
-}
-
-function isLockStale(path, mtimeFallbackMs) {
-  const pid = readLockOwnerPid(path);
-  if (pid !== null) {
-    // 自己 pid 见到 = 必然 stale（理论不可能：try/finally 保证 unlink；
-    // 若发生 → 视作可回收，避免 2 秒死锁）
-    if (pid === process.pid) return true;
-    return !isPidAlive(pid);
-  }
-  try {
-    const stats = statSync(path);
-    return Date.now() - stats.mtimeMs > mtimeFallbackMs;
-  } catch {
-    return false;
-  }
-}
-
 function withLock(fn) {
-  mkdirSync(LOG_DIR, { recursive: true });
-  const deadline = Date.now() + 2000;
-  const STALE_THRESHOLD = 5000;
-  while (true) {
-    try {
-      const fd = openSync(getLockFile(), 'wx');
-      try {
-        writeSync(fd, JSON.stringify({ pid: process.pid, ts: Date.now() }));
-      } finally {
-        closeSync(fd);
-      }
-      break;
-    } catch (err) {
-      if (err?.code === 'EEXIST') {
-        if (Date.now() < deadline) {
-          if (isLockStale(getLockFile(), STALE_THRESHOLD)) {
-            try { unlinkSync(getLockFile()); } catch {}
-            continue;
-          }
-          sleep(25);
-          continue;
-        }
-      }
-      throw err;
-    }
-  }
-  try { return fn(); } finally {
-    try { unlinkSync(getLockFile()); } catch {}
-  }
+  return withFileLockAsync(getLockFile(), fn, { ensureDir: LOG_DIR });
 }
 
 /**
@@ -187,11 +116,11 @@ export function saveAskStore(entries) {
  * last-write-wins 覆盖错乱（A 选 X 落盘 → B 选 Y 又落 → ask-bridge 最终拿 Y 而 A UI 显 X）。
  * Returns true if this call wrote, false if noop'd by existing terminal state.
  */
-export function markAnswered(id, answers) {
+export async function markAnswered(id, answers) {
   if (!id || typeof id !== 'string') return false;
   if (!answers || typeof answers !== 'object') return false;
   try {
-    return withLock(() => {
+    return await withLock(() => {
       const all = loadAskStore();
       const existing = all[id];
       if (existing && (existing.status === 'answered' || existing.status === 'cancelled')) {
@@ -211,10 +140,10 @@ export function markAnswered(id, answers) {
   } catch { return false; }
 }
 
-export function markCancelled(id, reason) {
+export async function markCancelled(id, reason) {
   if (!id || typeof id !== 'string') return false;
   try {
-    return withLock(() => {
+    return await withLock(() => {
       const all = loadAskStore();
       const existing = all[id];
       if (existing && (existing.status === 'answered' || existing.status === 'cancelled')) {
@@ -242,10 +171,10 @@ export function markCancelled(id, reason) {
  * 替代旧的 "无条件 consume + setEntry 写回" 双 withLock 模式 —— 那种模式的两次锁
  * 中间窗口会被 markAnswered 命中 → setEntry 把答案覆盖回 pending。
  */
-export function consumeIfFinal(id) {
+export async function consumeIfFinal(id) {
   if (!id || typeof id !== 'string') return null;
   try {
-    return withLock(() => {
+    return await withLock(() => {
       const all = loadAskStore();
       const entry = all[id];
       if (!entry) return null;
@@ -265,10 +194,10 @@ export function consumeIfFinal(id) {
  * truly want "read + delete regardless of status"). New short-poll GET handler
  * uses consumeIfFinal instead — see server.js GET /api/ask-hook/:id/result.
  */
-export function consume(id) {
+export async function consume(id) {
   if (!id || typeof id !== 'string') return null;
   try {
-    return withLock(() => {
+    return await withLock(() => {
       const all = loadAskStore();
       const entry = all[id];
       if (!entry) return null;
@@ -289,11 +218,11 @@ export function consume(id) {
  * setEntry 不能把 status 倒回 pending —— 否则 setImmediate 排队的延迟 _persistAskEntry
  * 或重 POST 的 placeholder 会覆盖真实终态，导致 ask-bridge 短轮询永远拿不到答案。
  */
-export function setEntry(id, fields) {
+export async function setEntry(id, fields) {
   if (!id || typeof id !== 'string') return;
   if (!fields || !Array.isArray(fields.questions)) return;
   try {
-    withLock(() => {
+    await withLock(() => {
       const all = loadAskStore();
       const existing = all[id];
       if (existing && (existing.status === 'answered' || existing.status === 'cancelled')) {
@@ -312,10 +241,10 @@ export function setEntry(id, fields) {
   }
 }
 
-export function deleteEntry(id) {
+export async function deleteEntry(id) {
   if (!id || typeof id !== 'string') return;
   try {
-    withLock(() => {
+    await withLock(() => {
       const all = loadAskStore();
       if (!(id in all)) return;
       delete all[id];
@@ -328,9 +257,9 @@ export function deleteEntry(id) {
  * Replace the entire store atomically. Used on server startup to drop entries
  * older than maxAgeMs (24h-class staleness sweep) without N round-trips.
  */
-export function replaceAll(entries) {
+export async function replaceAll(entries) {
   try {
-    withLock(() => saveAskStore(entries));
+    await withLock(() => saveAskStore(entries));
   } catch {}
 }
 
@@ -341,9 +270,9 @@ export function replaceAll(entries) {
  * Stale 判定用 max(createdAt, answeredAt)：刚 answered 的老 entry（createdAt 旧但
  * answeredAt 新）必须保留，否则 ask-bridge 短轮询拿不到答案。
  */
-export function pruneStale(maxAgeMs = 24 * 60 * 60 * 1000) {
+export async function pruneStale(maxAgeMs = 24 * 60 * 60 * 1000) {
   try {
-    return withLock(() => {
+    return await withLock(() => {
       const all = loadAskStore();
       const cutoff = Date.now() - maxAgeMs;
       const survivors = {};

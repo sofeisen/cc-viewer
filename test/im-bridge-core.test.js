@@ -122,11 +122,14 @@ describe('generic orchestration through a non-DingTalk adapter', () => {
   it('caps a reply at MAX_CHUNKS_PER_TURN (5) and appends a truncation marker', async () => {
     cfgA = { ...cfgA, maxChunkChars: 500 };           // late-bound via deps(() => cfgA); no re-prime needed
     await inbound(recA, { msgId: 'c1', content: 'go' }); // arm the slot (A owns it)
+    await tick(); // let the ack card promise settle (ackProcessing text send)
+    const ackSends = recA.sends.length;
     // Six ~300-char paragraphs → six chunks (two won't fit in 500) → capped to five.
     const sixParas = Array.from({ length: 6 }, (_, i) => `P${i}`.padEnd(300, 'x')).join('\n\n');
     await core.notifyTurnEnd('s', Date.now(), writeTranscript(sixParas));
-    assert.equal(recA.sends.length, 5, 'six chunks capped to five');
-    assert.match(recA.sends.at(-1).content, /截断|truncated/i, 'last chunk carries a truncation marker');
+    const replySends = recA.sends.slice(ackSends);
+    assert.equal(replySends.length, 5, 'six chunks capped to five');
+    assert.match(replySends.at(-1).content, /截断|truncated/i, 'last chunk carries a truncation marker');
   });
 });
 
@@ -146,9 +149,11 @@ describe('IM worker skip-permissions handling', () => {
     process.env.CCV_IM_PLATFORM = 'imA';
     try {
       await inbound(recA, { msgId: 'wrk1', content: 'go' });
+      await tick(); // let ack card promise settle
       assert.equal(injects.length, 1, 'worker injects despite blockOnSkipPermissions');
       assert.equal(injects[0], '\x1b[200~' + MARK('imA', 'go') + '\x1b[201~');
-      assert.equal(recA.sends.length, 0, 'no per-message skip-perm warning in worker mode');
+      // The ack card path fires (ackProcessing text); but no skip-perm warning.
+      assert.ok(!recA.sends.some((s) => /skip|权限/.test(s.content)), 'no per-message skip-perm warning in worker mode');
     } finally {
       delete process.env.CCV_IM_PLATFORM;
     }

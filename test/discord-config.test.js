@@ -16,7 +16,7 @@ describe('discord descriptor + normalize', () => {
   it('exposes the discord defaults (maxChunkChars 1900) and allowList field', () => {
     const d = getDescriptor('discord');
     assert.equal(d.allowListField, 'allowUserIds');
-    assert.deepEqual(d.defaults, { enabled: false, botToken: '', allowUserIds: [], maxChunkChars: 1900, blockOnSkipPermissions: false });
+    assert.deepEqual(d.defaults, { enabled: false, botToken: '', allowUserIds: [], maxChunkChars: 1900, blockOnSkipPermissions: false, ackCard: true });
   });
 
   it('empty config matches the default shape', () => {
@@ -25,7 +25,7 @@ describe('discord descriptor + normalize', () => {
 
   it('coerces types, trims token, de-dups allowUserIds, clamps chunk', () => {
     const n = normalize('discord', { enabled: 1, botToken: '  tok  ', allowUserIds: ['a', 'a', ' b ', '', 9], maxChunkChars: '50' });
-    assert.deepEqual(n, { enabled: true, botToken: 'tok', allowUserIds: ['a', 'b'], maxChunkChars: 500, blockOnSkipPermissions: false });
+    assert.deepEqual(n, { enabled: true, botToken: 'tok', allowUserIds: ['a', 'b'], maxChunkChars: 500, blockOnSkipPermissions: false, ackCard: true });
   });
 });
 
@@ -38,7 +38,7 @@ describe('discord save / load roundtrip', () => {
   it('roundtrips (plaintext in memory, base64 secret on disk)', () => {
     reset();
     saveConfig('discord', { enabled: true, botToken: 'topsecrettoken', allowUserIds: ['111'] });
-    assert.deepEqual(loadConfig('discord'), { enabled: true, botToken: 'topsecrettoken', allowUserIds: ['111'], maxChunkChars: 1900, blockOnSkipPermissions: false });
+    assert.deepEqual(loadConfig('discord'), { enabled: true, botToken: 'topsecrettoken', allowUserIds: ['111'], maxChunkChars: 1900, blockOnSkipPermissions: false, ackCard: true });
     const onDisk = JSON.parse(readFileSync(getPrefsPath(), 'utf-8'));
     assert.equal(onDisk.discord.botToken, Buffer.from('topsecrettoken', 'utf-8').toString('base64'));
     assert.notEqual(onDisk.discord.botToken, 'topsecrettoken');

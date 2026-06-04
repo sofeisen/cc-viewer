@@ -130,6 +130,43 @@ const feishuAdapter = {
     }
   },
 
+  async sendAckCard(cfg, target, statusText, ctx) {
+    const client = ctx.store.sendClient;
+    if (!client) throw new Error('feishu send client not initialized');
+    const card = {
+      config: { wide_screen_mode: true },
+      header: { title: { tag: 'plain_text', content: 'Claude' }, template: 'blue' },
+      elements: [{ tag: 'div', text: { tag: 'lark_md', content: statusText } }],
+    };
+    const r = await client.im.v1.message.create({
+      params: { receive_id_type: target.receiveIdType },
+      data: { receive_id: target.receiveId, msg_type: 'interactive', content: JSON.stringify(card) },
+    });
+    if (r && typeof r.code === 'number' && r.code !== 0) {
+      throw new Error(`sendAckCard ${r.code}: ${r.msg || 'failed'}`);
+    }
+    return { messageId: r?.data?.message_id };
+  },
+
+  async updateAckCard(cfg, target, handle, content, status, ctx) {
+    try {
+      const client = ctx.store.sendClient;
+      if (!client) return false;
+      const templateMap = { done: 'green', interrupted: 'orange', error: 'red' };
+      const card = {
+        config: { wide_screen_mode: true },
+        header: { title: { tag: 'plain_text', content: 'Claude' }, template: templateMap[status] || 'blue' },
+        elements: [{ tag: 'div', text: { tag: 'lark_md', content } }],
+      };
+      const r = await client.im.v1.message.patch({
+        path: { message_id: handle.messageId },
+        data: { content: JSON.stringify(card) },
+      });
+      if (r && typeof r.code === 'number' && r.code !== 0) return false;
+      return true;
+    } catch { return false; }
+  },
+
   async testConnection(cfg, ctx) {
     try {
       const r = await ctx.fetch(tokenHost(cfg.region) + TOKEN_PATH, {

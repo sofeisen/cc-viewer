@@ -75,7 +75,7 @@ import { loadAuthConfig, loadAuthState, saveAuthConfig, clearProjectOverride, ge
 import { checkAndUpdate } from './lib/updater.js';
 import { loadPlugins, runWaterfallHook, runParallelHook } from './lib/plugin-loader.js';
 import { CONTEXT_WINDOW_FILE, readModelContextSize } from './lib/context-watcher.js';
-import { watchLogFile, startWatching, getWatchedFiles, sendEventToClients, sendToClients } from './lib/log-watcher.js';
+import { watchLogFile, startWatching, unwatchAll, sendEventToClients, sendToClients } from './lib/log-watcher.js';
 import { cleanupExtractCache } from './lib/jsonl-archive.js';
 
 
@@ -161,14 +161,13 @@ const ASK_HOOK_TIMEOUT_MS = ASK_TIMEOUT_MS;
 // 任何 pendingAskHooks.set(...) 后必须调 _persistAskEntry；.delete(...) 后必须调 _persistAskDelete。
 function _persistAskEntry(id, entry) {
   if (!entry || !Array.isArray(entry.questions)) return;
-  // 异步触发：磁盘 IO 不阻塞 ask 主流程（落盘失败不影响业务）
   setImmediate(() => {
-    try { askStoreSetEntry(id, { questions: entry.questions, createdAt: entry.createdAt }); } catch {}
+    askStoreSetEntry(id, { questions: entry.questions, createdAt: entry.createdAt }).catch(() => {});
   });
 }
 function _persistAskDelete(id) {
   setImmediate(() => {
-    try { askStoreDeleteEntry(id); } catch {}
+    askStoreDeleteEntry(id).catch(() => {});
   });
 }
 
@@ -775,11 +774,11 @@ export async function startViewer() {
   // 内存 Map 不 hydrate：旧 res 已死、新 ask-bridge 重连同 toolUseId 会自动复用槽位
   // （server.js 已有"旧 res 已断 → 复用"分支），无需在这里主动重建内存态。
   // 留下来的 disk 镜像供 /api/pending-asks 端点查询，让浏览器重连后仍能看见 pending 列表。
-  setImmediate(() => { try { askStorePruneStale(ASK_HOOK_TIMEOUT_MS); } catch {} });
+  setImmediate(() => { askStorePruneStale(ASK_HOOK_TIMEOUT_MS).catch(() => {}); });
   // 长跑进程兜底：短轮询路径下 markAnswered 标的终态 entry 若 ask-bridge 已死（GET 不再来 consume），
   // 仅靠启动 prune 永远清不掉。1h 周期触发一次，.unref() 不阻塞进程退出。
   const _pruneAskStoreInterval = setInterval(() => {
-    try { askStorePruneStale(ASK_HOOK_TIMEOUT_MS); } catch {}
+    askStorePruneStale(ASK_HOOK_TIMEOUT_MS).catch(() => {});
   }, 60 * 60 * 1000);
   _pruneAskStoreInterval.unref();
 
@@ -1268,7 +1267,7 @@ async function setupTerminalWebSocket(httpServer) {
               // Phase 3: short-poll 模式不立即删 disk —— 落 answered 让 GET listener / disk consume 拿
               if (askEntry.shortPoll) {
                 let wrote = false;
-                try { wrote = askStoreMarkAnswered(askId, msg.answers); } catch {}
+                try { wrote = await askStoreMarkAnswered(askId, msg.answers); } catch {}
                 if (wrote) {
                   _notifyShortPollAnswer(askId, msg.answers);
                   askAnswered = true;
@@ -1301,7 +1300,7 @@ async function setupTerminalWebSocket(httpServer) {
               // 不唤醒 listener（让 listener 等到 GET hit disk 拿到真实抢答者答案）—— 自然 idempotent。
               // 给当前 ws 发 ack-already-answered 让前端关 modal、不误覆盖灰态。
               let wrote = false;
-              try { wrote = askStoreMarkAnswered(askId, msg.answers); } catch {}
+              try { wrote = await askStoreMarkAnswered(askId, msg.answers); } catch {}
               if (wrote) {
                 _notifyShortPollAnswer(askId, msg.answers);
                 askAnswered = true;
@@ -1411,7 +1410,7 @@ async function setupTerminalWebSocket(httpServer) {
                 pendingAskHooks.delete(cancelId);
                 // Phase 3: short-poll 同样要让 disk + listener 知道，否则 ask-bridge 永远收不到 cancelled
                 if (askEntry.shortPoll) {
-                  try { askStoreMarkCancelled(cancelId, cancelReason); } catch {}
+                  try { await askStoreMarkCancelled(cancelId, cancelReason); } catch {}
                   _notifyShortPollCancel(cancelId, cancelReason);
                 } else {
                   _persistAskDelete(cancelId);
@@ -1429,7 +1428,7 @@ async function setupTerminalWebSocket(httpServer) {
                 // first-wins：disk 已是终态（如另一 client 抢先 answer）时 markCancelled 返 false，
                 // 不能唤醒 listener 用 cancel 覆盖真实 answer —— 让 listener 下次 GET consumeIfFinal
                 // 拿到真实 disk 终态自然投递。
-                const wrote = askStoreMarkCancelled(cancelId, cancelReason);
+                const wrote = await askStoreMarkCancelled(cancelId, cancelReason);
                 if (wrote) {
                   _notifyShortPollCancel(cancelId, cancelReason);
                   handled = true;
@@ -1645,10 +1644,12 @@ const _pendingTurnEndTimers = new Map(); // key: sessionId(string) | null → { 
 // 空串 / 非数 / 范围外都回 default + warn 一次。
 const TURN_END_DEBOUNCE_MS = (() => {
   const raw = process.env.CCV_TURN_END_DEBOUNCE_MS;
-  if (raw === undefined || raw === '' || /^\s*$/.test(raw)) return 10_000;
+  // IM worker 需要快速 turn_end 以驱动队列——默认 200ms（够 coalesce 重复 POST，不拖延回复）。
+  const imDefault = process.env.CCV_IM_PLATFORM ? 200 : 10_000;
+  if (raw === undefined || raw === '' || /^\s*$/.test(raw)) return imDefault;
   const n = Number(raw);
-  if (!Number.isFinite(n)) { console.warn(`[turn-end] CCV_TURN_END_DEBOUNCE_MS=${raw} not finite, using 10000`); return 10_000; }
-  if (n < 100 || n > 60_000) { console.warn(`[turn-end] CCV_TURN_END_DEBOUNCE_MS=${n} out of [100,60000], using 10000`); return 10_000; }
+  if (!Number.isFinite(n)) { console.warn(`[turn-end] CCV_TURN_END_DEBOUNCE_MS=${raw} not finite, using ${imDefault}`); return imDefault; }
+  if (n < 100 || n > 60_000) { console.warn(`[turn-end] CCV_TURN_END_DEBOUNCE_MS=${n} out of [100,60000], using ${imDefault}`); return imDefault; }
   return n;
 })();
 let _isStopping = false;
@@ -1824,11 +1825,8 @@ async function _doStop() {
       }
     } catch { }
   }
-  for (const logFile of getWatchedFiles().keys()) {
-    unwatchFile(logFile);
-  }
+  unwatchAll();
   unwatchFile(CONTEXT_WINDOW_FILE);
-  getWatchedFiles().clear();
   clients.forEach(client => client.end());
   // Truncate in place (not `clients = []`) so the array reference stays stable across
   // stop/start cycles — deps.clients and _logWatcherOpts() hold this same reference.

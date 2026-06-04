@@ -30,7 +30,9 @@ const SEEN_MAX = 500;
 const RATE_WINDOW_MS = 60_000;
 const MAX_CHUNKS_PER_TURN = 5;
 const MAX_QUEUE = 50;                    // cap inbound backlog so an authorized sender can't grow it unbounded
-const PENDING_TIMEOUT_MS = 10 * 60_000;  // release a stuck injection so the queue can't wedge forever
+const PENDING_TIMEOUT_MS = process.env.CCV_IM_PLATFORM ? 2 * 60_000 : 10 * 60_000;
+const IDLE_POLL_INTERVAL_MS = 5_000;     // check every 5s if streaming stopped
+const IDLE_POLL_THRESHOLD = 3;           // 3 consecutive idle ticks (15s) → synthetic turn_end
 const CONNECT_TIMEOUT_MS = 15_000;       // bound adapter.connect() so a hung start can't block others
 const STOP_WORDS = new Set(['/stop', 'stop', '停止', 'esc', '/esc']);
 
@@ -38,6 +40,8 @@ const STOP_WORDS = new Set(['/stop', 'stop', '停止', 'esc', '/esc']);
 const instances = new Map();             // platformId → instance
 let activeInjection = null;              // { platformId, since, target } — the one in-flight turn
 let activeInjectionTimer = null;         // self-heal timer if a turn_end never arrives
+let idlePollTimer = null;               // secondary idle detection (IM worker only)
+let idlePollCount = 0;                  // consecutive ticks where isStreaming() is false
 let fetchImpl = null;                    // shared test seam
 
 // ─── test seams ───
@@ -59,6 +63,7 @@ function newInstance(adapter) {
     queue: [],
     sendTimes: [],
     store: {},                           // adapter scratch (token cache, send client)
+    ackCardPromise: null,                 // Promise<handle|null> for the in-flight ack card
   };
 }
 
@@ -143,22 +148,63 @@ function queueCap(inst) {
   return inst.maxQueueOverride ?? MAX_QUEUE;
 }
 
+/**
+ * Await the in-flight ack card promise, update it with terminal text/status, and null
+ * the promise on `inst`. Returns true if the card was successfully updated. Best-effort:
+ * never throws, never blocks the slot release.
+ */
+async function finalizeAckCard(inst, target, text, status) {
+  try {
+    const handle = await inst.ackCardPromise?.catch(() => null);
+    inst.ackCardPromise = null;
+    if (handle && typeof inst.adapter.updateAckCard === 'function') {
+      const cfg = inst.bridgeDeps?.getConfig();
+      if (cfg) return !!(await inst.adapter.updateAckCard(cfg, target, handle, text, status, ctxFor(inst)).catch(() => false));
+    }
+  } catch { /* best-effort */ }
+  inst.ackCardPromise = null;
+  return false;
+}
+
 // ─── activeInjection lifecycle ───
 function clearActiveInjection() {
   activeInjection = null;
   if (activeInjectionTimer) { clearTimeout(activeInjectionTimer); activeInjectionTimer = null; }
+  if (idlePollTimer) { clearInterval(idlePollTimer); idlePollTimer = null; }
+  idlePollCount = 0;
 }
 function armActiveInjection(inst, target, since) {
-  activeInjection = { platformId: inst.adapter.id, since, target };
+  activeInjection = { platformId: inst.adapter.id, since, target, transcriptPath: null };
   if (activeInjectionTimer) clearTimeout(activeInjectionTimer);
-  activeInjectionTimer = setTimeout(() => {
+  activeInjectionTimer = setTimeout(async () => {
     // Only fire if THIS injection still owns the slot (symmetry with the inject-failure guard).
     if (!activeInjection || activeInjection.since !== since) return;
     audit(inst, 'reply-timeout', { conversationId: target?.conversationId });
-    clearActiveInjection();              // turn_end never came → release the slot globally…
+    const cardUpdated = await finalizeAckCard(inst, target, tr(inst, 'ackTimeout'), 'error');
+    if (!activeInjection || activeInjection.since !== since) return;
+    clearActiveInjection();
+    if (!cardUpdated) void sendReply(inst, target, tr(inst, 'ackTimeout'));
     drainAll();                          // …and let any platform's queue proceed
   }, PENDING_TIMEOUT_MS);
   if (typeof activeInjectionTimer.unref === 'function') activeInjectionTimer.unref();
+  // Secondary idle detection: poll isStreaming() to catch missed Stop hook events.
+  if (idlePollTimer) clearInterval(idlePollTimer);
+  idlePollCount = 0;
+  let sawStreaming = false;
+  idlePollTimer = setInterval(() => {
+    if (!activeInjection || activeInjection.since !== since) { clearInterval(idlePollTimer); idlePollTimer = null; return; }
+    const d = inst.bridgeDeps;
+    if (!d) return;
+    if (d.isStreaming()) { sawStreaming = true; idlePollCount = 0; return; }
+    if (!sawStreaming) return; // haven't seen streaming start yet — don't count idle
+    idlePollCount++;
+    if (idlePollCount >= IDLE_POLL_THRESHOLD) {
+      clearInterval(idlePollTimer); idlePollTimer = null;
+      audit(inst, 'idle-turn-end', { conversationId: target?.conversationId, idleSeconds: idlePollCount * IDLE_POLL_INTERVAL_MS / 1000 });
+      notifyTurnEnd(null, since, activeInjection?.transcriptPath || null);
+    }
+  }, IDLE_POLL_INTERVAL_MS);
+  if (typeof idlePollTimer.unref === 'function') idlePollTimer.unref();
 }
 
 // ─── small helpers ───
@@ -212,8 +258,8 @@ function isStopCommand(text) {
   return STOP_WORDS.has(text.trim().toLowerCase());
 }
 
-function tr(inst, key) {
-  return t(`${inst.adapter.i18nNs}.${key}`);
+function tr(inst, key, params) {
+  return t(`${inst.adapter.i18nNs}.${key}`, params);
 }
 
 // ─── transcript extraction (the safe outbound text source) ───
@@ -369,6 +415,11 @@ function handleInboundInner(inst, normalized) {
   if (isStopCommand(text)) {
     inst.bridgeDeps.writeToPty('\x1b'); // ESC interrupts the current turn (NOT killPty)
     audit(inst, 'stop', { conversationId });
+    const stoppedInst = activeInjection ? instances.get(activeInjection.platformId) : null;
+    const stoppedTarget = activeInjection?.target;
+    if (stoppedInst && stoppedTarget) {
+      void finalizeAckCard(stoppedInst, stoppedTarget, tr(stoppedInst, 'interrupted'), 'interrupted');
+    }
     // ESC interrupts whatever turn is live on the shared PTY (possibly another platform's), which
     // may mean its turn_end never fires. Release the global slot and resume all queues so /stop
     // can never wedge the bridge.
@@ -380,12 +431,13 @@ function handleInboundInner(inst, normalized) {
 
   if (inst.queue.length >= queueCap(inst)) {
     audit(inst, 'queue-full', { conversationId, queued: inst.queue.length });
-    void sendReply(inst, target, tr(inst, 'queueFull'));
+    void sendReply(inst, target, tr(inst, 'queueFull', { max: String(queueCap(inst)) }));
     return;
   }
   inst.queue.push({ ...target, senderId, content: text });
   if (activeInjection || inst.bridgeDeps.isStreaming()) {
-    void sendReply(inst, target, tr(inst, 'busyQueued'));
+    const ahead = inst.queue.length - 1;
+    void sendReply(inst, target, tr(inst, 'busyQueued', { ahead: String(ahead), max: String(queueCap(inst)) }));
   }
   drainQueue(inst);
 }
@@ -419,7 +471,19 @@ function drainQueue(inst) {
     }
     const since = Date.now();
     armActiveInjection(inst, item, since);
-    if (!isImWorker && skipPerm) {
+    // Instant ack: fire-and-forget so writeToPtySequential is never delayed.
+    if (cfg.ackCard !== false && typeof inst.adapter.sendAckCard === 'function') {
+      const ackTarget = item;
+      inst.ackCardPromise = inst.adapter.sendAckCard(cfg, item, tr(inst, 'ackProcessing'), ctxFor(inst))
+        .then((handle) => { if (!handle) void sendReply(inst, ackTarget, tr(inst, 'ackProcessing')); return handle; })
+        .catch((e) => { audit(inst, 'ack-card-error', { error: String(e?.message || e) }); void sendReply(inst, ackTarget, tr(inst, 'ackProcessing')); return null; });
+    } else if (cfg.ackCard !== false) {
+      void sendReply(inst, item, tr(inst, 'ackProcessing'));
+      inst.ackCardPromise = null;
+    } else {
+      inst.ackCardPromise = null;
+    }
+    if (!isImWorker && skipPerm && cfg.ackCard === false) {
       audit(inst, 'skip-perm-warning', { conversationId: item.conversationId });
       void sendReply(inst, item, tr(inst, 'skipPermWarning'));
     }
@@ -430,9 +494,13 @@ function drainQueue(inst) {
       if (ok) return;
       if (!activeInjection || activeInjection.platformId !== inst.adapter.id || activeInjection.since !== since) return;
       audit(inst, 'inject-failed', { conversationId: item.conversationId });
-      clearActiveInjection();
-      void sendReply(inst, item, tr(inst, 'injectFailed'));
-      drainAll();
+      void (async () => {
+        const cardUpdated = await finalizeAckCard(inst, item, tr(inst, 'injectFailed'), 'error');
+        if (!activeInjection || activeInjection.platformId !== inst.adapter.id || activeInjection.since !== since) return;
+        clearActiveInjection();
+        if (!cardUpdated) void sendReply(inst, item, tr(inst, 'injectFailed'));
+        drainAll();
+      })().catch(() => {});
     }, { settleMs: 250 });
     return; // one at a time; resume on the next turn_end
   }
@@ -447,6 +515,7 @@ function drainAll() {
 
 // ─── outbound trigger (called from server.js _emitTurnEnd) ───
 export async function notifyTurnEnd(sessionId, ts, transcriptPath) {
+  if (transcriptPath && activeInjection) activeInjection.transcriptPath = transcriptPath;
   if (!activeInjection) { drainAll(); return; } // only reply to turns a bridge initiated
   const inst = instances.get(activeInjection.platformId);
   if (!inst) { clearActiveInjection(); drainAll(); return; }
@@ -455,6 +524,9 @@ export async function notifyTurnEnd(sessionId, ts, transcriptPath) {
   // correlation is a v2 item.)
   if (ts && activeInjection.since && ts < activeInjection.since) { drainAll(); return; }
   const target = activeInjection.target;
+  // Grab the ack card promise before clearing state.
+  const ackP = inst.ackCardPromise;
+  inst.ackCardPromise = null;
   clearActiveInjection();
   // Idempotency for a doubled turn_end of the SAME turn (a re-broadcast carries the same ts).
   // Keyed on ts, NOT reply text.
@@ -466,8 +538,36 @@ export async function notifyTurnEnd(sessionId, ts, transcriptPath) {
   drainAll();
   let text = extractLastAssistantText(transcriptPath);
   if (!text) text = tr(inst, 'noTextReply');
-  try { await sendReply(inst, target, text); }
-  catch (e) { inst.lastError = String(e?.message || e); audit(inst, 'send-error', { error: inst.lastError }); }
+
+  // Try to update the ack card in-place with the reply. Fall back to sendReply on failure.
+  const handle = await ackP?.catch(() => null);
+  if (handle && typeof inst.adapter.updateAckCard === 'function') {
+    const cfg = inst.bridgeDeps.getConfig();
+    let chunks = chunkText(text, cfg.maxChunkChars);
+    if (chunks.length > MAX_CHUNKS_PER_TURN) {
+      chunks = chunks.slice(0, MAX_CHUNKS_PER_TURN);
+      chunks[MAX_CHUNKS_PER_TURN - 1] += '\n\n' + tr(inst, 'truncated');
+    }
+    try {
+      const updated = await inst.adapter.updateAckCard(cfg, target, handle, chunks[0] || text, 'done', ctxFor(inst));
+      if (updated && chunks.length > 1) {
+        for (let i = 1; i < chunks.length; i++) {
+          try { await rateLimitGate(inst); await inst.adapter.sendOne(cfg, target, chunks[i], ctxFor(inst)); }
+          catch (e) { inst.lastError = String(e?.message || e); audit(inst, 'send-error', { error: inst.lastError }); break; }
+        }
+      } else if (!updated) {
+        await sendReply(inst, target, text);
+      }
+      audit(inst, 'out', { conversationId: target.conversationId, chunks: chunks.length, cardUpdated: !!updated });
+    } catch (e) {
+      inst.lastError = String(e?.message || e);
+      audit(inst, 'card-update-error', { error: inst.lastError });
+      try { await sendReply(inst, target, text); } catch { /* already logged in sendReply */ }
+    }
+  } else {
+    try { await sendReply(inst, target, text); }
+    catch (e) { inst.lastError = String(e?.message || e); audit(inst, 'send-error', { error: inst.lastError }); }
+  }
 }
 
 // ─── per-platform lifecycle ───
@@ -504,6 +604,11 @@ export async function startBridge(id, deps) {
 export async function stopBridge(id) {
   const inst = instances.get(id);
   if (!inst) return;
+  if (inst.ackCardPromise && activeInjection?.platformId === id) {
+    await finalizeAckCard(inst, activeInjection.target, tr(inst, 'noSession'), 'error');
+  } else {
+    inst.ackCardPromise = null;
+  }
   try { await inst.adapter.disconnect?.(inst.client, ctxFor(inst)); } catch { /* best-effort */ }
   inst.client = null;
   inst.running = false;

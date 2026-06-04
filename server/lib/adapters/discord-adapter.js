@@ -129,6 +129,41 @@ const discordAdapter = {
     }
   },
 
+  async sendAckCard(cfg, target, statusText, ctx) {
+    const client = ctx.store.client;
+    if (!client) throw new Error('discord client not connected');
+    let channel;
+    if (target.userId) {
+      const user = await client.users.fetch(target.userId);
+      channel = await user.createDM();
+    } else {
+      channel = await client.channels.fetch(target.channelId);
+    }
+    if (!channel || typeof channel.send !== 'function') throw new Error(`channel not sendable: ${target.channelId}`);
+    const msg = await channel.send(statusText);
+    return { channelId: target.channelId, messageId: msg.id, userId: target.userId };
+  },
+
+  async updateAckCard(cfg, target, handle, content, status, ctx) {
+    try {
+      const client = ctx.store.client;
+      if (!client) return false;
+      let channel;
+      if (handle.userId) {
+        const user = await client.users.fetch(handle.userId);
+        channel = await user.createDM();
+      } else {
+        channel = await client.channels.fetch(handle.channelId);
+      }
+      if (!channel || typeof channel.messages?.fetch !== 'function') return false;
+      const msg = await channel.messages.fetch(handle.messageId);
+      await msg.edit(content.slice(0, DISCORD_MAX));
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
   async testConnection(cfg, ctx) {
     // Validate the token via REST without opening a gateway (and without the privileged intent).
     try {

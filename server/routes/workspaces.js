@@ -1,8 +1,8 @@
 // Workspace routes (moved verbatim from server.js handleRequest).
-import { existsSync, statSync, unwatchFile } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { basename } from 'node:path';
 import { LOG_FILE, initForWorkspace, resetWorkspace } from '../interceptor.js';
-import { watchLogFile, getWatchedFiles } from '../lib/log-watcher.js';
+import { watchLogFile, unwatchAll } from '../lib/log-watcher.js';
 import { readClaudeProjectModel } from '../lib/context-watcher.js';
 import { countLogEntries, streamRawEntriesAsync } from '../lib/log-stream.js';
 
@@ -30,7 +30,7 @@ function workspacesLaunch(req, res, parsedUrl, isLocal, deps) {
       }
 
       const { registerWorkspace } = await import('../workspace-registry.js');
-      registerWorkspace(wsPath);
+      await registerWorkspace(wsPath);
 
       // Electron multi-tab 模式：管理 server 只触发 callback，不做日志初始化
       // 所有日志相关操作（initForWorkspace、watchLogFile、spawnClaude）由 tab-worker 子进程负责
@@ -107,7 +107,7 @@ function workspacesAdd(req, res, parsedUrl, isLocal, deps) {
         return;
       }
       const { registerWorkspace } = await import('../workspace-registry.js');
-      const entry = registerWorkspace(wsPath);
+      const entry = await registerWorkspace(wsPath);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, workspace: entry }));
     } catch (err) {
@@ -120,8 +120,8 @@ function workspacesAdd(req, res, parsedUrl, isLocal, deps) {
 function workspacesDelete(req, res, parsedUrl) {
   const url = parsedUrl.pathname;
   const id = url.split('/').pop();
-  import('../workspace-registry.js').then(({ removeWorkspace }) => {
-    const removed = removeWorkspace(id);
+  import('../workspace-registry.js').then(async ({ removeWorkspace }) => {
+    const removed = await removeWorkspace(id);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: removed }));
   }).catch(err => {
@@ -138,10 +138,7 @@ function workspacesStop(req, res, parsedUrl, isLocal, deps) {
     // 接续原有清理流程
 
     // 停止日志监听
-    for (const logFile of getWatchedFiles().keys()) {
-      unwatchFile(logFile);
-    }
-    getWatchedFiles().clear();
+    unwatchAll();
 
     // 重置 interceptor 状态
     resetWorkspace();
