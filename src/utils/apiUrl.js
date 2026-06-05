@@ -4,7 +4,8 @@ const _urlToken = new URLSearchParams(window.location.search).get('token');
 // 反向代理子路径部署: 从 <base> 标签或 SSR 注入的全局变量读取 base path，
 // 使 API/WebSocket 等动态请求也能正确路由到代理后端。
 export function getBasePath() {
-  if (window.__CCV_BASE_PATH__) return window.__CCV_BASE_PATH__;
+  if (typeof window !== 'undefined' && window.__CCV_BASE_PATH__) return window.__CCV_BASE_PATH__;
+  if (typeof document === 'undefined' || !document.querySelector) return '';
   const base = document.querySelector('base');
   if (base && base.href) return base.getAttribute('href');
   return '';

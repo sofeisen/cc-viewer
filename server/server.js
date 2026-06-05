@@ -1060,7 +1060,11 @@ async function setupTerminalWebSocket(httpServer) {
     httpServer.on('upgrade', (req, socket, head) => {
       const wsUrl = new URL(req.url, `${serverProtocol}://${req.headers.host}`);
       let pathname = wsUrl.pathname;
-const bpRaw = process.env.CCV_BASE_PATH || '';      if (bpRaw && bpRaw !== '/' && pathname.startsWith(bpRaw)) {        pathname = pathname.slice(bpRaw.length) || '/';      }
+      const bpRaw = process.env.CCV_BASE_PATH || '';
+      const wsBp = bpRaw && bpRaw !== '/' ? bpRaw.replace(/\/?$/, '/') : '';
+      if (wsBp && pathname.startsWith(wsBp)) {
+        pathname = '/' + pathname.slice(wsBp.length);
+      }
       // 与 HTTP 一致的鉴权（此前 WS upgrade 完全不校验 token，远程终端实为无门禁——本次堵洞）。
       // 在此显式计算 isLocal（与 handleRequest 同款三态判断），WS 视作非 HTML 请求。
       const wsRemoteIp = req.socket.remoteAddress;
