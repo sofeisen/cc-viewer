@@ -4,7 +4,7 @@ import { join, basename } from 'node:path';
 import { LOG_DIR } from '../../findcc.js';
 import { _projectName } from '../interceptor.js';
 import { listLocalLogs, deleteLogFiles, mergeLogFiles, archiveLogFiles, validateLogPath } from '../lib/log-management.js';
-import { countLogEntries, streamRawEntriesAsync } from '../lib/log-stream.js';
+import { countLogEntries, streamRawEntriesAsync, readTailEntries } from '../lib/log-stream.js';
 
 async function localLogs(req, res) {
   try {
@@ -96,7 +96,7 @@ async function localLog(req, res, parsedUrl) {
     // 独立 SSE 流：直接向请求方返回 event-stream，不走 /events 广播
     validateLogPath(LOG_DIR, file);
     const filePath = join(LOG_DIR, file);
-    const total = await countLogEntries(filePath);
+    const limitVal = Math.min(parseInt(parsedUrl.searchParams.get('limit'), 10) || 0, 500);
 
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -104,12 +104,25 @@ async function localLog(req, res, parsedUrl) {
       'Connection': 'keep-alive',
     });
 
-    res.write(`event: load_start\ndata: ${JSON.stringify({ total, incremental: false })}\n\n`);
-    await streamRawEntriesAsync(filePath, (raw) => {
-      res.write('event: load_chunk\ndata: [');
-      res.write(raw.includes('\n') ? raw.replace(/\n/g, '') : raw);
-      res.write(']\n\n');
-    });
+    if (limitVal > 0) {
+      // 尾部加载模式：跳过 countLogEntries，只读文件末尾
+      const { entries, hasMore, oldestTimestamp, estimatedTotal } = await readTailEntries(filePath, { limit: limitVal });
+      res.write(`event: load_start\ndata: ${JSON.stringify({ total: estimatedTotal, incremental: false, hasMore, oldestTs: oldestTimestamp })}\n\n`);
+      for (const raw of entries) {
+        res.write('event: load_chunk\ndata: [');
+        res.write(raw.includes('\n') ? raw.replace(/\n/g, '') : raw);
+        res.write(']\n\n');
+      }
+    } else {
+      // 全量加载模式（向后兼容）
+      const total = await countLogEntries(filePath);
+      res.write(`event: load_start\ndata: ${JSON.stringify({ total, incremental: false })}\n\n`);
+      await streamRawEntriesAsync(filePath, (raw) => {
+        res.write('event: load_chunk\ndata: [');
+        res.write(raw.includes('\n') ? raw.replace(/\n/g, '') : raw);
+        res.write(']\n\n');
+      });
+    }
     res.write(`event: load_end\ndata: {}\n\n`);
     res.end();
   } catch (err) {

@@ -2,7 +2,7 @@ import { existsSync, realpathSync, unlinkSync, readdirSync, readFileSync, writeF
 import { readFile, writeFile, appendFile, stat, readdir } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { renameSyncWithRetry } from './file-api.js';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { reconstructEntries } from './delta-reconstructor.js';
 import { streamReconstructedEntriesAsync } from './log-stream.js';
 import { archiveJsonl, resolveJsonlPath } from './jsonl-archive.js';
@@ -16,7 +16,7 @@ export function validateLogPath(logDir, file) {
   }
   const realPath = realpathSync(filePath);
   const realLogDir = realpathSync(logDir);
-  if (!realPath.startsWith(realLogDir)) {
+  if (realPath !== realLogDir && !realPath.startsWith(realLogDir + sep)) {
     const err = new Error('Access denied');
     err.code = 'ACCESS_DENIED';
     throw err;
@@ -96,7 +96,7 @@ export function deleteLogFiles(logDir, files) {
       }
       const realPath = realpathSync(filePath);
       const realLogDir = realpathSync(logDir);
-      if (!realPath.startsWith(realLogDir)) {
+      if (realPath !== realLogDir && !realPath.startsWith(realLogDir + sep)) {
         results.push({ file, error: 'Access denied' });
         continue;
       }
@@ -241,7 +241,7 @@ export function archiveLogFiles(logDir, files) {
       try {
         if (!existsSync(filePath)) { failed.push({ file: f, reason: 'Not found' }); continue; }
         realPath = realpathSync(filePath);
-        if (!realPath.startsWith(realLogDir)) {
+        if (realPath !== realLogDir && !realPath.startsWith(realLogDir + sep)) {
           failed.push({ file: f, reason: 'Access denied' });
           continue;
         }

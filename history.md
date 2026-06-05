@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.298 (2026-06-05)
+
+- perf(mobile): 移动端打开历史日志尾部优先加载——服务端新增 `readTailEntries()` 仅读文件末尾 2-8MB，`/api/local-log?limit=300` 跳过全文件扫描直接返回最新条目；客户端立即渲染，旧条目按需分页加载；`/api/entries/page` 支持 `file` 参数用于本地日志分页
+- perf(terminal): PTY 输出批次启用 DEC Private Mode 2026 同步渲染——每个 `setImmediate` 批次用 `\x1b[?2026h`/`\x1b[?2026l` 包裹，xterm.js 6.0 延迟绘制直到批次结束，消除中间帧闪烁
+- fix(terminal): WebGL longtask 自动降级——PerformanceObserver 监测 GPU 长任务，30 秒内 3 次 >200ms 则自动切 DOM 渲染器，localStorage 记录 7 天后重试；修正 4 处过时 Canvas 渲染器注释
+- fix(win): SSE 重连风暴防治——`requestIdleCallback` 延迟 SSE 连接等浏览器初始化完成；桌面端重连改用 `?since=` 增量加载避免全量重载；重连退避从固定 2s 改为指数退避（2s→32s 上限）
+
 ## 1.6.296 (2026-06-05)
 
 - perf(win): 异步写入队列替代 interceptor 热路径的 appendFileSync，消除每次 API 请求 50-300ms 的事件循环阻塞

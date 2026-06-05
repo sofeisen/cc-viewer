@@ -616,7 +616,7 @@ class AppBase extends React.Component {
     if (logfile) {
       this.loadLocalLogFile(logfile);
     } else {
-      this.initSSE();
+      this._scheduleInitSSE();
     }
   }
 
@@ -628,6 +628,7 @@ class AppBase extends React.Component {
       }
       this._tabBridgeDisposers = null;
     }
+    this._unmounted = true;
     if (this.eventSource) this.eventSource.close();
     if (this._localLogES) { this._localLogES.close(); this._localLogES = null; }
     if (this._autoSelectTimer) clearTimeout(this._autoSelectTimer);
@@ -657,6 +658,15 @@ class AppBase extends React.Component {
   };
 
   // 不关闭 EventSource —— 连接是会话级单例，workspace 切换复用同一条连接。
+  _scheduleInitSSE() {
+    const start = () => { if (!this._unmounted) this.initSSE(); };
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(start, { timeout: 2000 });
+    } else {
+      requestAnimationFrame(() => requestAnimationFrame(start));
+    }
+  }
+
   _teardownTransientLiveState = () => {
     this._pendingEntries = [];
     if (this._flushRafId) { cancelAnimationFrame(this._flushRafId); this._flushRafId = null; }
@@ -704,7 +714,8 @@ class AppBase extends React.Component {
     this._teardownTransientLiveState();
     this.setState({ isStreaming: false, contextBarLocked: false });
     if (this._sseReconnectTimer) clearTimeout(this._sseReconnectTimer);
-    this._sseReconnectTimer = setTimeout(() => { this.initSSE(); }, 2000);
+    const delay = Math.min(2000 * Math.pow(2, (this._sseReconnectCount || 1) - 1), 32000);
+    this._sseReconnectTimer = setTimeout(() => { this.initSSE(); }, delay);
   }
 
   animateLoadingCount(target, onDone) {
@@ -740,7 +751,10 @@ class AppBase extends React.Component {
     this._loadingMore = true;
     this.setState({ loadingMore: true });
     try {
-      const res = await fetch(apiUrl(`/api/entries/page?before=${encodeURIComponent(this._oldestTs)}&limit=100`));
+      const pageUrl = this._isLocalLog
+        ? `/api/entries/page?file=${encodeURIComponent(this._localLogFile)}&before=${encodeURIComponent(this._oldestTs)}&limit=100`
+        : `/api/entries/page?before=${encodeURIComponent(this._oldestTs)}&limit=100`;
+      const res = await fetch(apiUrl(pageUrl));
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (Array.isArray(data.entries) && data.entries.length > 0) {
@@ -804,6 +818,18 @@ class AppBase extends React.Component {
         const meta = getCacheMeta();
         if (meta && meta.lastTs && meta.count > 0) {
           url = `/events?since=${encodeURIComponent(meta.lastTs)}&cc=${meta.count}&project=${encodeURIComponent(meta.projectName || '')}`;
+          hasCache = true;
+        }
+      }
+      // 桌面端重连：用最后接收到的时间戳做增量加载，避免全量重载放大卡顿
+      if (!hasCache && !isMobile && this._sseReconnectCount > 0 && this.state.requests.length > 0) {
+        const reqs = this.state.requests;
+        let lastTs = null;
+        for (let i = reqs.length - 1; i >= 0; i--) {
+          if (reqs[i]?.timestamp) { lastTs = reqs[i].timestamp; break; }
+        }
+        if (lastTs && this.state.projectName) {
+          url = `/events?since=${encodeURIComponent(lastTs)}&cc=${reqs.length}&project=${encodeURIComponent(this.state.projectName)}`;
           hasCache = true;
         }
       }
@@ -1228,12 +1254,16 @@ class AppBase extends React.Component {
     if (this._localLogES) { this._localLogES.close(); this._localLogES = null; }
 
     const entries = [];
-    const es = new EventSource(apiUrl(`/api/local-log?file=${encodeURIComponent(file)}`));
+    // 移动端尾部加载：只请求最新 300 条，其余按需分页
+    const limitParam = isMobile ? '&limit=300' : '';
+    const es = new EventSource(apiUrl(`/api/local-log?file=${encodeURIComponent(file)}${limitParam}`));
     this._localLogES = es;
 
     es.addEventListener('load_start', (event) => {
       try {
         const data = JSON.parse(event.data);
+        this._hasMoreHistory = !!data.hasMore;
+        this._oldestTs = data.oldestTs || null;
         this.setState({ fileLoadingCount: 0 });
       } catch { }
     });
@@ -1265,6 +1295,7 @@ class AppBase extends React.Component {
           fileLoading: false,
           fileLoadingCount: 0,
           serverCachedContent: null,
+          hasMoreHistory: !!this._hasMoreHistory && !!this._oldestTs,
         });
       } else {
         this.setState({ fileLoading: false, fileLoadingCount: 0, serverCachedContent: null });
@@ -2118,6 +2149,8 @@ class AppBase extends React.Component {
       const { mainAgentSessions, filtered } = this._processEntries(entries);
       this._isLocalLog = true;
       this._localLogFile = fileNames.length === 1 ? fileNames[0] : `${fileNames.length} files`;
+      this._hasMoreHistory = false;
+      this._oldestTs = null;
       if (this.eventSource) { this.eventSource.close(); this.eventSource = null; }
       if (this._streamingOffTimer) { clearTimeout(this._streamingOffTimer); this._streamingOffTimer = null; }
       this.setState({
@@ -2127,6 +2160,7 @@ class AppBase extends React.Component {
         importModalVisible: false,
         fileLoading: false,
         fileLoadingCount: 0,
+        hasMoreHistory: false,
       });
     });
   };

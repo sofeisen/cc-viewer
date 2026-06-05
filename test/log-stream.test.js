@@ -5,10 +5,10 @@
  */
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, appendFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, appendFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { countLogEntries, streamReconstructedEntries, streamReconstructedEntriesAsync, streamRawEntriesAsync, readPagedEntries } from '../server/lib/log-stream.js';
+import { countLogEntries, streamReconstructedEntries, streamReconstructedEntriesAsync, streamRawEntriesAsync, readPagedEntries, readTailEntries } from '../server/lib/log-stream.js';
 import { readLogFile } from '../server/lib/log-watcher.js';
 import { reconstructSegment, reconstructEntries } from '../server/lib/delta-reconstructor.js';
 
@@ -1031,5 +1031,250 @@ describe('readPagedEntries', () => {
 
     const result = await readPagedEntries(logFile, { before: '2099-01-01T00:00:00Z', limit: 5 });
     assert.equal(result.count, result.entries.length, 'count should equal entries.length');
+  });
+});
+
+// ============================================================================
+// readTailEntries — 尾部读取（移动端首屏加载优化）
+// ============================================================================
+
+describe('readTailEntries', () => {
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'log-stream-tail-'));
+    logFile = join(tmpDir, 'test.jsonl');
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('不存在的文件返回空', async () => {
+    const result = await readTailEntries(join(tmpDir, 'nope.jsonl'), { limit: 10 });
+    assert.equal(result.entries.length, 0);
+    assert.equal(result.hasMore, false);
+    assert.equal(result.estimatedTotal, 0);
+  });
+
+  it('空文件返回空', async () => {
+    writeFileSync(logFile, '');
+    const result = await readTailEntries(logFile, { limit: 10 });
+    assert.equal(result.entries.length, 0);
+    assert.equal(result.hasMore, false);
+  });
+
+  it('小文件 fallback：条目数少于 limit 时返回全部', async () => {
+    writeFileSync(logFile, '');
+    simulateInterceptorWrites(logFile, [
+      { newMessages: [msg('user', 'q1'), msg('assistant', 'a1')] },
+      { newMessages: [msg('user', 'q2'), msg('assistant', 'a2')] },
+    ]);
+
+    const result = await readTailEntries(logFile, { limit: 100 });
+    assert.ok(result.entries.length > 0, 'Should return some entries');
+    assert.equal(result.hasMore, false, 'hasMore should be false for small files');
+  });
+
+  it('entries 是原始 JSON 字符串数组', async () => {
+    writeFileSync(logFile, '');
+    simulateInterceptorWrites(logFile, [
+      { newMessages: [msg('user', 'q1')] },
+    ]);
+
+    const result = await readTailEntries(logFile, { limit: 10 });
+    assert.ok(result.entries.length > 0);
+    for (const entry of result.entries) {
+      assert.equal(typeof entry, 'string', 'Each entry should be a raw JSON string');
+      assert.doesNotThrow(() => JSON.parse(entry), 'Each entry should be valid JSON');
+    }
+  });
+
+  it('去重：inProgress 被 completed 覆盖', async () => {
+    writeFileSync(logFile, '');
+    simulateInterceptorWrites(logFile, [
+      { newMessages: [msg('user', 'q1'), msg('assistant', 'a1')] },
+    ]);
+
+    const result = await readTailEntries(logFile, { limit: 100 });
+    const parsed = result.entries.map(r => JSON.parse(r));
+    const inProgressEntries = parsed.filter(e => e.inProgress);
+    assert.equal(inProgressEntries.length, 0, 'inProgress entries should be deduped away');
+  });
+
+  it('limit 裁剪：返回最新 N 条', async () => {
+    writeFileSync(logFile, '');
+    const turns = [];
+    for (let i = 0; i < 15; i++) {
+      turns.push({ newMessages: [msg('user', `q${i}`), msg('assistant', `a${i}`)] });
+    }
+    simulateInterceptorWrites(logFile, turns);
+
+    // 全量获取用于对比
+    const allRaws = [];
+    await streamRawEntriesAsync(logFile, (r) => allRaws.push(r));
+
+    const result = await readTailEntries(logFile, { limit: 5 });
+    assert.ok(result.entries.length >= 5, `Should return at least limit entries, got ${result.entries.length}`);
+    assert.ok(result.entries.length < allRaws.length, 'Should return fewer than total');
+    assert.ok(result.hasMore, 'hasMore should be true');
+  });
+
+  it('checkpoint 对齐：首条是 checkpoint', async () => {
+    writeFileSync(logFile, '');
+    const turns = [];
+    for (let i = 0; i < 25; i++) {
+      turns.push({ newMessages: [msg('user', `q${i}`), msg('assistant', `a${i}`)] });
+    }
+    simulateInterceptorWrites(logFile, turns);
+
+    const result = await readTailEntries(logFile, { limit: 3 });
+    assert.ok(result.entries.length > 0);
+    const first = JSON.parse(result.entries[0]);
+    const isCheckpoint = first._isCheckpoint === true || !first._deltaFormat;
+    assert.ok(isCheckpoint, 'First entry should be a checkpoint after alignment');
+  });
+
+  it('尾部条目与全量加载结果一致（delta 重建验证）', async () => {
+    writeFileSync(logFile, '');
+    const turns = [];
+    for (let i = 0; i < 15; i++) {
+      turns.push({ newMessages: [msg('user', `q${i}`), msg('assistant', `a${i}`)] });
+    }
+    simulateInterceptorWrites(logFile, turns);
+
+    // 全量加载 → 重建
+    const allRaws = [];
+    await streamRawEntriesAsync(logFile, (r) => allRaws.push(r));
+    const allParsed = allRaws.map(r => JSON.parse(r));
+    const fullResult = reconstructEntries([...allParsed]);
+
+    // 尾部加载 → 重建
+    const tailResult = await readTailEntries(logFile, { limit: 5 });
+    const tailParsed = tailResult.entries.map(r => JSON.parse(r));
+    const tailReconstructed = reconstructEntries(tailParsed);
+
+    // 尾部加载的最后一条 mainAgent 应与全量结果的最后一条 messages 完全一致
+    const fullMains = fullResult.filter(e => e.mainAgent && !e.inProgress);
+    const tailMains = tailReconstructed.filter(e => e.mainAgent && !e.inProgress);
+
+    const fLast = fullMains[fullMains.length - 1];
+    const tLast = tailMains[tailMains.length - 1];
+    assert.equal(tLast.body.messages.length, fLast.body.messages.length,
+      'Last mainAgent entry should have the same message count as full load');
+    for (let i = 0; i < tLast.body.messages.length; i++) {
+      assert.equal(tLast.body.messages[i].content, fLast.body.messages[i].content,
+        `Message ${i} content should match full load`);
+    }
+  });
+
+  it('oldestTimestamp 是返回条目中最早的时间戳', async () => {
+    writeFileSync(logFile, '');
+    const turns = [];
+    for (let i = 0; i < 10; i++) {
+      turns.push({ newMessages: [msg('user', `q${i}`)] });
+    }
+    simulateInterceptorWrites(logFile, turns);
+
+    const result = await readTailEntries(logFile, { limit: 5 });
+    assert.ok(result.oldestTimestamp, 'oldestTimestamp should be set');
+    const timestamps = result.entries.map(r => {
+      const m = r.match(/"timestamp"\s*:\s*"([^"]+)"/);
+      return m ? m[1] : null;
+    }).filter(Boolean).sort();
+    assert.equal(result.oldestTimestamp, timestamps[0], 'Should match earliest entry');
+  });
+
+  it('estimatedTotal 是正数', async () => {
+    writeFileSync(logFile, '');
+    const turns = [];
+    for (let i = 0; i < 10; i++) {
+      turns.push({ newMessages: [msg('user', `q${i}`)] });
+    }
+    simulateInterceptorWrites(logFile, turns);
+
+    const result = await readTailEntries(logFile, { limit: 5 });
+    assert.ok(result.estimatedTotal > 0, 'estimatedTotal should be positive');
+  });
+
+  it('limit >= 全部条目数时返回全部', async () => {
+    writeFileSync(logFile, '');
+    simulateInterceptorWrites(logFile, [
+      { newMessages: [msg('user', 'q1'), msg('assistant', 'a1')] },
+      { newMessages: [msg('user', 'q2'), msg('assistant', 'a2')] },
+    ]);
+
+    const allRaws = [];
+    await streamRawEntriesAsync(logFile, (r) => allRaws.push(r));
+
+    const result = await readTailEntries(logFile, { limit: 9999 });
+    assert.equal(result.entries.length, allRaws.length, 'Should return all entries');
+    assert.equal(result.hasMore, false);
+  });
+
+  it('>2MB 文件走真正的尾部读取路径（非 fallback）', async () => {
+    writeFileSync(logFile, '');
+    // 写入足够条目使文件 > 2MB（每条约 1-2KB，需要 ~1500 轮）
+    // 用大 system prompt 让每条更大，减少轮数
+    const bigSystem = 'x'.repeat(4000);
+    const turns = [];
+    for (let i = 0; i < 300; i++) {
+      turns.push({ newMessages: [msg('user', `q${i}-${bigSystem}`), msg('assistant', `a${i}`)] });
+    }
+    simulateInterceptorWrites(logFile, turns);
+
+    const fileSize = statSync(logFile).size;
+    assert.ok(fileSize > 2 * 1024 * 1024, `File should be > 2MB, got ${fileSize}`);
+
+    // 全量加载 → 重建
+    const allRaws = [];
+    await streamRawEntriesAsync(logFile, (r) => allRaws.push(r));
+    const fullParsed = allRaws.map(r => JSON.parse(r));
+    const fullResult = reconstructEntries([...fullParsed]);
+
+    // 尾部加载 → 重建
+    const result = await readTailEntries(logFile, { limit: 20 });
+    assert.ok(result.entries.length >= 20, `Should return at least limit entries, got ${result.entries.length}`);
+    assert.ok(result.entries.length < allRaws.length, 'Should return fewer than total');
+    assert.ok(result.hasMore, 'hasMore should be true');
+    assert.ok(result.estimatedTotal > 0, 'estimatedTotal should be positive');
+
+    // 首条应为 checkpoint（确保 delta 重建正确）
+    const first = JSON.parse(result.entries[0]);
+    const isCheckpoint = first._isCheckpoint === true || !first._deltaFormat;
+    assert.ok(isCheckpoint, 'First entry should be a checkpoint');
+
+    // 尾部重建的最后一条应与全量一致
+    const tailReconstructed = reconstructEntries(result.entries.map(r => JSON.parse(r)));
+    const fullMains = fullResult.filter(e => e.mainAgent && !e.inProgress);
+    const tailMains = tailReconstructed.filter(e => e.mainAgent && !e.inProgress);
+    const fLast = fullMains[fullMains.length - 1];
+    const tLast = tailMains[tailMains.length - 1];
+    assert.equal(tLast.body.messages.length, fLast.body.messages.length,
+      'Tail-loaded last entry should match full-loaded last entry messages count');
+  });
+
+  it('窗口内无 checkpoint 时自动扩大重试（>2MB 文件，真正覆盖 retry 路径）', async () => {
+    writeFileSync(logFile, '');
+    // 先写 1 轮（产生 checkpoint），然后写大量 delta 使文件 > 2MB
+    // checkpoint 在文件头部，后续 delta 填满 > 2MB → 首次 2MB 窗口内无 checkpoint → 触发 retry
+    const turns = [{ newMessages: [msg('user', 'initial'), msg('assistant', 'start')] }];
+    simulateInterceptorWrites(logFile, turns);
+    // 每条约 300KB，8 轮 × 2 entries ≈ 4.8MB+
+    const bigContent = 'z'.repeat(160000);
+    const moreTurns = [];
+    for (let i = 1; i <= 8; i++) {
+      moreTurns.push({ newMessages: [msg('user', `q${i}-${bigContent}`), msg('assistant', `a${i}`)] });
+    }
+    simulateInterceptorWrites(logFile, moreTurns);
+
+    const fileSize = statSync(logFile).size;
+    assert.ok(fileSize > 2 * 1024 * 1024, `File must be > 2MB to exercise retry path, got ${fileSize}`);
+
+    const result = await readTailEntries(logFile, { limit: 5 });
+    assert.ok(result.entries.length >= 5, 'Should return entries');
+
+    // 验证首条确实是 checkpoint（说明重试扩大了窗口找到了它）
+    const first = JSON.parse(result.entries[0]);
+    const isCheckpoint = first._isCheckpoint === true || !first._deltaFormat;
+    assert.ok(isCheckpoint, 'Should have expanded window to find a checkpoint');
   });
 });

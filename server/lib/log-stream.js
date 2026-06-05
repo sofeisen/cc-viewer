@@ -60,8 +60,11 @@ function* iterateRawEntries(filePath) {
 /**
  * 异步 Generator：分块读取 JSONL 文件，逐条 yield 原始 JSON 字符串。
  * 使用 fs.promises.open + fileHandle.read，不阻塞事件循环。
+ *
+ * @param {string} filePath
+ * @param {{ startOffset?: number }} [opts] - startOffset>0 时从该偏移量开始读取并跳过首条（可能被截断）
  */
-async function* iterateRawEntriesAsync(filePath) {
+async function* iterateRawEntriesAsync(filePath, { startOffset = 0 } = {}) {
   filePath = resolveJsonlPath(filePath);
   let fh;
   try {
@@ -69,9 +72,10 @@ async function* iterateRawEntriesAsync(filePath) {
     if (st.size === 0) return;
     fh = await fsOpen(filePath, 'r');
     const fileSize = st.size;
-    const buf = Buffer.alloc(Math.min(READ_CHUNK_SIZE, fileSize));
-    let offset = 0;
+    const buf = Buffer.alloc(Math.min(READ_CHUNK_SIZE, fileSize - startOffset));
+    let offset = startOffset;
     let pending = '';
+    let isFirst = startOffset > 0;
 
     while (offset < fileSize) {
       const toRead = Math.min(buf.length, fileSize - offset);
@@ -85,11 +89,14 @@ async function* iterateRawEntriesAsync(filePath) {
 
       for (const part of parts) {
         const trimmed = part.trim();
-        if (trimmed) yield trimmed;
+        if (!trimmed) continue;
+        if (isFirst) { isFirst = false; continue; }
+        yield trimmed;
       }
     }
 
     if (pending.trim()) {
+      if (isFirst) return;
       yield pending.trim();
     }
   } finally {
@@ -354,6 +361,115 @@ export async function streamRawEntriesAsync(filePath, onRawEntry, opts = {}) {
   return { sentCount, totalCount };
 }
 
+// ============================================================================
+// Tail Read — 从文件尾部高效读取最新条目（移动端首屏加载优化）
+// ============================================================================
+
+const TAIL_INITIAL_BYTES = 2 * 1024 * 1024; // 首次尝试读取末尾 2MB
+const TAIL_FALLBACK_THRESHOLD = 2 * 1024 * 1024; // 小于此值直接全文件读（与 TAIL_INITIAL_BYTES 相等但概念独立）
+
+/** 收集异步可迭代对象中的条目到 dedup Map（extractDedupKey + last-write-wins） */
+async function _collectDedup(asyncIterable) {
+  const dedup = new Map();
+  for await (const raw of asyncIterable) {
+    const key = extractDedupKey(raw);
+    if (key) {
+      dedup.set(key, raw);
+    } else {
+      dedup.set(`__nokey_${dedup.size}`, raw);
+    }
+  }
+  return dedup;
+}
+
+/**
+ * 从末尾取 limit 条 + 向前扩展到 checkpoint 边界。
+ * @returns {{ sliced: string[], hasMore: boolean, startsAtCheckpoint: boolean }}
+ */
+function _sliceToCheckpoint(entries, limit) {
+  limit = Math.max(limit, 1);
+  if (entries.length <= limit) {
+    return { sliced: entries, hasMore: false, startsAtCheckpoint: entries.length === 0 || isCheckpointRaw(entries[0]) };
+  }
+  let startIdx = Math.max(0, entries.length - limit);
+  while (startIdx > 0 && !isCheckpointRaw(entries[startIdx])) {
+    startIdx--;
+  }
+  return {
+    sliced: entries.slice(startIdx),
+    hasMore: startIdx > 0,
+    startsAtCheckpoint: isCheckpointRaw(entries[startIdx]),
+  };
+}
+
+/**
+ * 从文件尾部读取最新 limit 条条目（去重 + checkpoint 边界扩展）。
+ *
+ * 优化策略：只读文件末尾 2-8MB，避免全文件扫描。
+ * 小文件 (< 2MB) 自动 fallback 到全文件读取。
+ * 当尾部窗口内找不到 checkpoint 时自动扩大窗口重试，确保 delta 重建正确。
+ *
+ * @param {string} filePath
+ * @param {{ limit?: number }} opts
+ * @returns {Promise<{ entries: string[], hasMore: boolean, oldestTimestamp: string, estimatedTotal: number }>}
+ */
+export async function readTailEntries(filePath, { limit = 300 } = {}) {
+  filePath = resolveJsonlPath(filePath);
+  const emptyResult = { entries: [], hasMore: false, oldestTimestamp: '', estimatedTotal: 0 };
+  if (!existsSync(filePath)) return emptyResult;
+  const st = statSync(filePath);
+  if (st.size === 0) return emptyResult;
+
+  const fileSize = st.size;
+
+  if (fileSize <= TAIL_FALLBACK_THRESHOLD) {
+    return _readTailFull(filePath, limit, fileSize);
+  }
+
+  let tailBytes = TAIL_INITIAL_BYTES;
+  const MAX_RETRIES = 2;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const startOffset = Math.max(0, fileSize - tailBytes);
+    const dedup = await _collectDedup(iterateRawEntriesAsync(filePath, { startOffset }));
+    const collected = dedup.size;
+
+    const allEntries = Array.from(dedup.values());
+    const { sliced, hasMore: sliceHasMore, startsAtCheckpoint } = _sliceToCheckpoint(allEntries, limit);
+
+    // 需要重试的条件：条目不足 或 窗口内无 checkpoint（delta 重建会截断）
+    const needsRetry = (collected < limit || !startsAtCheckpoint) && startOffset > 0;
+    if (needsRetry && attempt < MAX_RETRIES) {
+      tailBytes *= 2;
+      continue;
+    }
+    if (needsRetry && attempt === MAX_RETRIES) {
+      return _readTailFull(filePath, limit, fileSize);
+    }
+
+    const hasMore = startOffset > 0 || sliceHasMore;
+    const oldestTimestamp = sliced.length > 0 ? (extractTimestamp(sliced[0]) || '') : '';
+    const avgBytes = tailBytes / Math.max(collected, 1);
+    const estimatedTotal = Math.round(fileSize / avgBytes);
+
+    return { entries: sliced, hasMore, oldestTimestamp, estimatedTotal };
+  }
+
+  return emptyResult; // unreachable
+}
+
+/** fallback：全文件读取后取尾部 limit 条 */
+async function _readTailFull(filePath, limit, fileSize) {
+  const dedup = await _collectDedup(iterateRawEntriesAsync(filePath));
+  const totalCount = dedup.size;
+  if (totalCount === 0) return { entries: [], hasMore: false, oldestTimestamp: '', estimatedTotal: 0 };
+
+  const allEntries = Array.from(dedup.values());
+  const { sliced, hasMore } = _sliceToCheckpoint(allEntries, limit);
+  const oldestTimestamp = extractTimestamp(sliced[0]) || '';
+  return { entries: sliced, hasMore, oldestTimestamp, estimatedTotal: totalCount };
+}
+
 /**
  * 读取分页历史条目（用于 /api/entries/page REST 端点）。
  *
@@ -371,20 +487,12 @@ export async function readPagedEntries(filePath, { before, limit }) {
   const stat = statSync(filePath);
   if (stat.size === 0) return { entries: [], hasMore: false, oldestTimestamp: '', count: 0 };
 
-  const dedup = new Map();
-  for await (const raw of iterateRawEntriesAsync(filePath)) {
-    const key = extractDedupKey(raw);
-    if (key) {
-      dedup.set(key, raw);
-    } else {
-      dedup.set(`__nokey_${dedup.size}`, raw);
-    }
-  }
+  const dedup = await _collectDedup(iterateRawEntriesAsync(filePath));
 
   // 过滤 timestamp < before
   const filtered = [];
   for (const [key, raw] of dedup) {
-    if (key.startsWith('__nokey_')) continue; // 无 key 条目跳过（无法确定 timestamp）
+    if (key.startsWith('__nokey_')) continue;
     const ts = extractTimestamp(raw);
     if (ts && ts < before) {
       filtered.push(raw);
@@ -395,16 +503,7 @@ export async function readPagedEntries(filePath, { before, limit }) {
     return { entries: [], hasMore: false, oldestTimestamp: '', count: 0 };
   }
 
-  // 从末尾取最后 limit 条
-  let startIdx = Math.max(0, filtered.length - limit);
-  // 向前扩展到 checkpoint 边界
-  while (startIdx > 0 && !isCheckpointRaw(filtered[startIdx])) {
-    startIdx--;
-  }
-
-  const hasMore = startIdx > 0;
-  const sliced = filtered.slice(startIdx);
+  const { sliced, hasMore } = _sliceToCheckpoint(filtered, limit);
   const oldestTimestamp = extractTimestamp(sliced[0]) || '';
-
   return { entries: sliced, hasMore, oldestTimestamp, count: sliced.length };
 }

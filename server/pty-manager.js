@@ -81,10 +81,16 @@ function findSafeSliceStart(buf, rawStart) {
   return i < buf.length ? i : rawStart;
 }
 
+// DEC Private Mode 2026 (Synchronized Output) markers.
+// xterm.js 6.0+ 原生支持：收到 BEGIN 后缓存所有写入，收到 END 后一次性渲染，
+// 消除批次内的中间帧闪烁。不支持的终端会忽略这些序列。
+const SYNC_BEGIN = '\x1b[?2026h';
+const SYNC_END   = '\x1b[?2026l';
+
 function flushBatch() {
   batchScheduled = false;
   if (!batchBuffer) return;
-  const chunk = batchBuffer;
+  const chunk = SYNC_BEGIN + batchBuffer + SYNC_END;
   batchBuffer = '';
   for (const cb of dataListeners) {
     try { cb(chunk); } catch { }

@@ -1,11 +1,13 @@
 // SSE event stream + log-registration / resume / turn-end routes (moved verbatim from server.js).
 import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { LOG_FILE, _resumeState, resolveResumeChoice, _projectName } from '../interceptor.js';
 import { LOG_DIR } from '../../findcc.js';
 import { watchLogFile } from '../lib/log-watcher.js';
 import { countLogEntries, streamRawEntriesAsync, readPagedEntries } from '../lib/log-stream.js';
 import { awaitDrainOrClose } from '../lib/sse-backpressure.js';
 import { enrichRawIfNeeded } from '../lib/enrich-plan-input.js';
+import { validateLogPath } from '../lib/log-management.js';
 import { isMainAgentEntry, extractCachedContent } from '../lib/kv-cache-analyzer.js';
 import { CONTEXT_WINDOW_FILE, readModelContextSize, buildContextWindowEvent, getContextSizeForModel } from '../lib/context-watcher.js';
 
@@ -313,6 +315,7 @@ async function requests(req, res) {
 }
 
 // 分页历史条目端点：移动端"加载更多"按需拉取
+// 支持可选 ?file= 参数指定目标文件（用于本地日志分页），默认使用活跃会话文件
 async function entriesPage(req, res, parsedUrl) {
   const before = parsedUrl.searchParams.get('before');
   const limitVal = Math.min(parseInt(parsedUrl.searchParams.get('limit'), 10) || 100, 500);
@@ -321,8 +324,24 @@ async function entriesPage(req, res, parsedUrl) {
     res.end(JSON.stringify({ error: 'missing or invalid "before" parameter' }));
     return;
   }
+  const file = parsedUrl.searchParams.get('file');
+  let targetFile = LOG_FILE;
+  if (file) {
+    if (file.includes('..') || (!file.endsWith('.jsonl') && !file.endsWith('.jsonl.zip'))) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid file name' }));
+      return;
+    }
+    try { validateLogPath(LOG_DIR, file); } catch (e) {
+      const status = e.code === 'NOT_FOUND' ? 404 : e.code === 'ACCESS_DENIED' ? 403 : 400;
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: e.message }));
+      return;
+    }
+    targetFile = join(LOG_DIR, file);
+  }
   try {
-    const result = await readPagedEntries(LOG_FILE, { before, limit: limitVal });
+    const result = await readPagedEntries(targetFile, { before, limit: limitVal });
     // entries 是原始 JSON 字符串数组，parse 后返回给客户端
     // ExitPlanMode V2 空 input 的条目用 enrichRawIfNeeded 在 raw 阶段补全
     const entries = result.entries.map(raw => {

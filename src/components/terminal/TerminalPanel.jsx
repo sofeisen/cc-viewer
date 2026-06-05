@@ -35,6 +35,14 @@ import { darkTerminalTheme, lightTerminalTheme } from './terminalThemes';
 import { resizeImageIfNeeded } from '../../utils/imageResize';
 import { calcResizedSize } from '../../utils/resizeCalc';
 
+// WebGL longtask 自动降级常量
+const WEBGL_STALL_MS = 200;          // 单次 longtask 阈值 (ms)
+const WEBGL_STALL_COUNT = 3;         // 触发降级的 stall 次数
+const WEBGL_STALL_WINDOW_MS = 30000; // 滑动窗口 (ms)
+const WEBGL_GRACE_MS = 5000;         // 初始化宽限期 (ms)
+const WEBGL_STICKY_KEY = 'ccv_webgl_disabled_until';
+const WEBGL_STICKY_TTL_MS = 7 * 24 * 3600 * 1000; // 7 天后自动重试
+
 // UltraPlan popover 拖拽尺寸持久化:与 UltraPlanModal 共享语义但 key 分开,因为
 // popover 几何/位置约束不同(浮锚 trigger 按钮、最大约 70vh,modal 居中可到 90vh)。
 const _ULTRAPLAN_POPOVER_W_KEY = 'cc-viewer-ultraplan-popover-width';
@@ -605,9 +613,8 @@ class TerminalPanel extends React.Component {
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
     }
-    if (this.webglAddon) {
-      this.webglAddon.dispose();
-      this.webglAddon = null;
+    if (this.webglAddon || this._webglLongtaskObserver) {
+      this._disposeWebgl();
     }
     if (this.terminal) {
       if (this.terminal.textarea) {
@@ -652,8 +659,7 @@ class TerminalPanel extends React.Component {
       termTextarea.addEventListener('blur', this._handleTermBlur);
     }
 
-    // 启用 WebGL 渲染器，GPU 加速绘制，失败时自动回退 Canvas
-    // iOS 移动端 WebGL 性能差，直接使用 Canvas 渲染器
+    // 启用 WebGL 渲染器（GPU 加速）；iOS 跳过，走 xterm.js 6.0 内置 DOM 渲染器
     if (!isIOS) {
       this._loadWebglAddon(false);
     }
@@ -953,12 +959,12 @@ class TerminalPanel extends React.Component {
     }
   }
 
-  // 强制重绘终端,走 xterm 官方 escape hatch,**不**通过改 DOM 高度骗 fit() 重建 canvas
+  // 强制重绘终端,走 xterm 官方 escape hatch,**不**通过改 DOM 高度骗 fit() 重建渲染层
   // (旧 hack 会让 viewport scrollTop 在 shrink/restore 之间错位 ≈shrink 像素)。
   // 三档分别对应不同严重度的 xterm 渲染 issue:
   //   L1: clearTextureAtlas + refresh —— 纹理脏 / sleep-wake 后小花屏
   //   L2: L1 + fitAddon.fit() —— 维度漂移叠加纹理脏
-  //   L3: dispose+reload WebglAddon (onContextLoss 同款配方) + fit + 纹理重画 —— 整片白屏 / canvas 失同步
+  //   L3: dispose+reload WebglAddon (onContextLoss 同款配方) + fit + 纹理重画 —— 整片白屏 / WebGL 失同步
   // 两条调用路径:handleForceRefresh(用户点击,连击窗口推进级别),60s 自动定时器(走 L2 做预防性维护)。
   _executeRefresh = (level) => {
     const term = this.terminal;
@@ -1035,11 +1041,16 @@ class TerminalPanel extends React.Component {
   }
 
   _loadWebglAddon(isRetry) {
+    // Sticky disable 检查：7 天内曾因 GPU 长任务降级过，跳过 WebGL 加载
+    try {
+      const until = localStorage.getItem(WEBGL_STICKY_KEY);
+      if (until && Date.now() < Number(until)) return;
+    } catch {}
+
     try {
       this.webglAddon = new WebglAddon();
       this.webglAddon.onContextLoss(() => {
-        this.webglAddon?.dispose();
-        this.webglAddon = null;
+        this._disposeWebgl();
         if (!isRetry) {
           this._webglRecoveryTimer = setTimeout(() => {
             this._webglRecoveryTimer = null;
@@ -1048,8 +1059,53 @@ class TerminalPanel extends React.Component {
         }
       });
       this.terminal.loadAddon(this.webglAddon);
+      this._installWebglLongtaskGuard();
     } catch {
       this.webglAddon = null;
+    }
+  }
+
+  _disposeWebgl() {
+    if (this._webglLongtaskObserver) {
+      this._webglLongtaskObserver.disconnect();
+      this._webglLongtaskObserver = null;
+    }
+    if (this.webglAddon) {
+      try { this.webglAddon.dispose(); } catch {}
+      this.webglAddon = null;
+    }
+  }
+
+  // GPU 长任务监测：滑动窗口内累积 stall 达到阈值则自动降级到 DOM 渲染器
+  _installWebglLongtaskGuard() {
+    if (typeof PerformanceObserver === 'undefined') return;
+    const startTime = performance.now();
+    const recentStalls = [];
+
+    this._webglLongtaskObserver = new PerformanceObserver((list) => {
+      if (!this.webglAddon) return;
+      const now = performance.now();
+      if (now - startTime < WEBGL_GRACE_MS) return;
+      for (const entry of list.getEntries()) {
+        if (entry.duration >= WEBGL_STALL_MS) {
+          recentStalls.push(now);
+        }
+      }
+      while (recentStalls.length > 0 && now - recentStalls[0] > WEBGL_STALL_WINDOW_MS) {
+        recentStalls.shift();
+      }
+      if (recentStalls.length >= WEBGL_STALL_COUNT) {
+        console.warn('[cc-viewer] WebGL longtask guard: %d stalls in %ds, falling back to DOM renderer',
+          recentStalls.length, WEBGL_STALL_WINDOW_MS / 1000);
+        try { localStorage.setItem(WEBGL_STICKY_KEY, String(Date.now() + WEBGL_STICKY_TTL_MS)); } catch {}
+        this._disposeWebgl();
+        this.terminal?.refresh(0, this.terminal.rows - 1);
+      }
+    });
+    try {
+      this._webglLongtaskObserver.observe({ type: 'longtask', buffered: false });
+    } catch {
+      this._webglLongtaskObserver = null;
     }
   }
 
@@ -1057,16 +1113,13 @@ class TerminalPanel extends React.Component {
   // 配方)。保留 cols/rows/scrollback,不动 DOM 高度,不影响其他 addon。
   _rebuildWebglAddon = () => {
     if (!this.terminal) return;
-    if (isIOS) return; // 与 init 中跳过 WebGL 的判断对齐:iOS 始终走 Canvas
+    if (isIOS) return; // iOS 不加载 WebGL，始终走 DOM 渲染器
     // 抢在 onContextLoss recovery 之前清 timer,否则 1s 后醒来会把刚 rebuild 的 addon 再 load 一次
     if (this._webglRecoveryTimer) {
       clearTimeout(this._webglRecoveryTimer);
       this._webglRecoveryTimer = null;
     }
-    if (this.webglAddon) {
-      try { this.webglAddon.dispose(); } catch {}
-      this.webglAddon = null;
-    }
+    this._disposeWebgl();
     this._loadWebglAddon(false);
   };
 
