@@ -660,8 +660,11 @@ class AppBase extends React.Component {
   // 不关闭 EventSource —— 连接是会话级单例，workspace 切换复用同一条连接。
   _scheduleInitSSE() {
     const start = () => { if (!this._unmounted) this.initSSE(); };
+    // Windows 冷启动时 V8 需要 3-5 秒编译 ~7MB JS bundle（热启动有 Code Cache 则 <0.5s）。
+    // timeout 设为 5 秒确保编译完成后再建 SSE 连接，避免数据处理与编译竞争导致 tab 崩溃。
+    // 浏览器空闲时会提前触发（不必等满 5 秒），所以对热启动/Mac 无感知延迟。
     if (typeof requestIdleCallback === 'function') {
-      requestIdleCallback(start, { timeout: 2000 });
+      requestIdleCallback(start, { timeout: 5000 });
     } else {
       requestAnimationFrame(() => requestAnimationFrame(start));
     }
@@ -833,9 +836,11 @@ class AppBase extends React.Component {
           hasCache = true;
         }
       }
-      // 移动端无缓存时只加载最近 200 条，剩余按需分页
-      if (!hasCache && isMobile) {
-        url = '/events?limit=200';
+      // 无缓存时限制首屏加载量，剩余按需分页。
+      // 移动端 200 条；桌面端 400 条（Windows 上 1000 条的同步重建 + React 渲染
+      // 可达 10-15s，超出 Chrome tab kill 阈值导致崩溃）。
+      if (!hasCache) {
+        url = `/events?limit=${isMobile ? 200 : 400}`;
       }
       // 只有在无缓存时才显示 loading 遮罩
       if (!hasCache) {
