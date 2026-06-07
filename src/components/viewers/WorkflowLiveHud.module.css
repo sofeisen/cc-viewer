@@ -90,6 +90,19 @@
   color: var(--color-primary);
 }
 
+.doing {
+  flex: 0 0 auto;
+  max-width: 140px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: var(--color-primary-pale);
+  border-radius: 4px;
+  padding: 0 6px;
+  font-size: 11px;
+  color: var(--color-primary);
+}
+
 .model {
   flex: 0 0 auto;
   color: var(--text-gray);
@@ -106,9 +119,18 @@
 .dur { color: var(--text-gray); }
 
 .more {
+  display: block;
+  width: 100%;
+  text-align: left;
   padding: 3px 10px;
-  color: var(--text-gray);
+  color: var(--color-primary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
 }
+
+.more:hover { text-decoration: underline; }
 
 .liveDot {
   flex: 0 0 auto;

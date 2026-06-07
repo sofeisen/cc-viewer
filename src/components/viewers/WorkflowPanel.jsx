@@ -13,17 +13,27 @@ function stateClass(state) {
   return styles.stateRunning;
 }
 
+function barClass(state) {
+  if (state === 'done' || state === 'completed') return styles.barDone;
+  if (state === 'failed' || state === 'error') return styles.barFailed;
+  if (state === 'queued') return styles.barQueued;
+  return styles.barRunning;
+}
+
 function AgentRow({ agent }) {
   const model = getModelShort(agent.model);
   const is1M = agent.model && getModelMaxTokens(agent.model) >= 1000000;
   const running = !TERMINAL_STATES.has(agent.state);
   const dur = fmtDuration(agent.durationMs);
+  // 运行中显示「在干嘛」：最近一次工具名（hover 看摘要）
+  const doing = running && agent.lastToolName ? agent.lastToolName : '';
   return (
     <div className={styles.agentRow}>
       <span className={`${styles.stateDot} ${stateClass(agent.state)} ${running ? styles.statePulse : ''}`} title={agent.state}>
         {stateGlyph(agent.state)}
       </span>
       <span className={styles.agentLabel} title={agent.label}>{agent.label || agent.agentType || agent.agentId}</span>
+      {doing && <span className={styles.agentDoing} title={agent.lastToolSummary || doing}>{doing}</span>}
       {model && (
         <span className={styles.agentModel}>{model}{is1M ? ' · 1M' : ''}</span>
       )}
@@ -36,7 +46,51 @@ function AgentRow({ agent }) {
   );
 }
 
-function WorkflowBody({ data }) {
+// 时间轴/甘特：每个 agent 一条 startedAt→duration 横条，直观看出并行与长尾瓶颈。
+// 运行中的 agent 横条延伸到 now（每秒走）。
+function WorkflowTimeline({ data, now }) {
+  const agents = (data.agents || []).filter(a => typeof a.startedAt === 'number');
+  if (!agents.length) return <div className={styles.notice}>{t('ui.workflow.noTimeline')}</div>;
+
+  const endOf = (a) => a.startedAt + (typeof a.durationMs === 'number' ? a.durationMs : Math.max(0, now - a.startedAt));
+  const start = Math.min(...agents.map(a => a.startedAt));
+  const end = Math.max(...agents.map(endOf));
+  const span = Math.max(1, end - start);
+  const sorted = [...agents].sort((x, y) => x.startedAt - y.startedAt);
+
+  return (
+    <div className={styles.timeline}>
+      {sorted.map((a, i) => {
+        const running = !TERMINAL_STATES.has(a.state);
+        const aEnd = endOf(a);
+        const left = ((a.startedAt - start) / span) * 100;
+        const width = Math.max(1.5, ((aEnd - a.startedAt) / span) * 100);
+        const d = fmtDuration(a.durationMs ?? Math.max(0, now - a.startedAt));
+        return (
+          <div key={a.agentId || i} className={styles.ganttRow}>
+            <span className={styles.ganttLabel} title={a.label}>{a.label || a.agentType || a.agentId}</span>
+            <div className={styles.ganttTrack}>
+              <div
+                className={`${styles.ganttBar} ${barClass(a.state)} ${running ? styles.statePulse : ''}`}
+                style={{ left: `${left}%`, width: `${width}%` }}
+                title={`${a.label || ''} · ${d}`}
+              >
+                <span className={styles.ganttDur}>{d}</span>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function WorkflowBody({ data, view, now }) {
+  if (view === 'timeline') return <WorkflowTimeline data={data} now={now} />;
+  return <WorkflowList data={data} />;
+}
+
+function WorkflowList({ data }) {
   const activePhaseIndex = useMemo(() => {
     const running = (data.agents || []).filter(a => !TERMINAL_STATES.has(a.state) && typeof a.phaseIndex === 'number');
     if (running.length) return Math.max(...running.map(a => a.phaseIndex));
@@ -104,6 +158,15 @@ export default function WorkflowPanel({ workflow, resultText, defaultCollapsed }
   const [data, setData] = useState(() => getLatest(key));
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [view, setView] = useState('list');  // 'list' | 'timeline'
+  const [now, setNow] = useState(() => Date.now());
+
+  // 时间轴模式下、运行中时每秒走一帧，让进行中横条延伸
+  useEffect(() => {
+    if (view !== 'timeline' || !data?.live) return undefined;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [view, data?.live]);
 
   // REST 首拉
   useEffect(() => {
@@ -160,6 +223,20 @@ export default function WorkflowPanel({ workflow, resultText, defaultCollapsed }
               {statusLabel ? ` · ${statusLabel}` : ''}
             </span>
           )}
+          {data && !collapsed && (
+            <span className={styles.viewToggle} onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                className={`${styles.viewBtn} ${view === 'list' ? styles.viewBtnActive : ''}`}
+                onClick={() => setView('list')}
+              >{t('ui.workflow.viewList')}</button>
+              <button
+                type="button"
+                className={`${styles.viewBtn} ${view === 'timeline' ? styles.viewBtnActive : ''}`}
+                onClick={() => { setNow(Date.now()); setView('timeline'); }}
+              >{t('ui.workflow.viewTimeline')}</button>
+            </span>
+          )}
           <span className={styles.toggle}>{collapsed ? t('ui.expand') : t('ui.collapse')}</span>
         </div>
       </div>
@@ -167,7 +244,7 @@ export default function WorkflowPanel({ workflow, resultText, defaultCollapsed }
         <>
           {error && !data && <div className={styles.notice}>{t('ui.workflow.loadFailed')}</div>}
           {loading && !data && <div className={styles.notice}>{t('ui.workflow.loading')}</div>}
-          {data && <WorkflowBody data={data} />}
+          {data && <WorkflowBody data={data} view={view} now={now} />}
         </>
       )}
     </div>

@@ -18,10 +18,12 @@ function Row({ agent }) {
   const running = !TERMINAL_STATES.has(agent.state);
   const model = getModelShort(agent.model);
   const dur = fmtDuration(agent.durationMs);
+  const doing = running && agent.lastToolName ? agent.lastToolName : '';
   return (
     <div className={styles.row}>
       <span className={`${styles.dot} ${stateClass(agent.state)} ${running ? styles.statePulse : ''}`}>{stateGlyph(agent.state)}</span>
       <span className={styles.label} title={agent.label}>{agent.label || agent.agentType || agent.agentId}</span>
+      {doing && <span className={styles.doing} title={agent.lastToolSummary || doing}>{doing}</span>}
       {model && <span className={styles.model}>{model}</span>}
       <span className={styles.tok}>{fmtTokens(agent.tokens)} {t('ui.workflow.tok')}</span>
       <span className={styles.tool}>{agent.toolCalls} {t('ui.workflow.tools')}</span>
@@ -38,6 +40,7 @@ function Row({ agent }) {
 export default function WorkflowLiveHud() {
   const [active, setActive] = useState(getActiveWorkflows);
   const [collapsed, setCollapsed] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   const [dismissed, setDismissed] = useState({});
   const [, setTick] = useState(0);
 
@@ -67,8 +70,9 @@ export default function WorkflowLiveHud() {
   const elapsed = data.startTime ? fmtDuration(Date.now() - data.startTime) : '';
 
   const running = agents.filter(a => !TERMINAL_STATES.has(a.state));
-  const rows = (running.length ? running.concat(agents.filter(a => TERMINAL_STATES.has(a.state)).reverse()) : agents).slice(0, MAX_ROWS);
-  const moreCount = agents.length - rows.length;
+  const ordered = running.length ? running.concat(agents.filter(a => TERMINAL_STATES.has(a.state)).reverse()) : agents;
+  const rows = showAll ? ordered : ordered.slice(0, MAX_ROWS);
+  const moreCount = ordered.length - rows.length;
 
   return (
     <div className={styles.bar} role="status" aria-live="polite">
@@ -95,7 +99,11 @@ export default function WorkflowLiveHud() {
       {!collapsed && (
         <div className={styles.rows}>
           {rows.map((a, i) => <Row key={a.agentId || i} agent={a} />)}
-          {moreCount > 0 && <div className={styles.more}>+{moreCount}…</div>}
+          {(moreCount > 0 || showAll) && (
+            <button type="button" className={styles.more} onClick={() => setShowAll(s => !s)}>
+              {showAll ? t('ui.collapse') : `+${moreCount}…`}
+            </button>
+          )}
         </div>
       )}
     </div>
