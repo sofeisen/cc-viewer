@@ -1157,7 +1157,7 @@ class ChatMessage extends React.Component {
   renderToolResult(tr) {
     if (!tr) return null;
     return (
-      <ToolResultView toolName={tr.toolName} toolInput={tr.toolInput} resultText={tr.resultText} images={tr.images} defaultCollapsed={this.props.collapseToolResults} />
+      <ToolResultView toolName={tr.toolName} toolInput={tr.toolInput} resultText={tr.resultText} images={tr.images} workflow={tr.workflow} defaultCollapsed={this.props.collapseToolResults} />
     );
   }
 
@@ -1561,7 +1561,7 @@ class ChatMessage extends React.Component {
   }
 
   renderSubAgentMessage() {
-    const { label, resultText, toolName, toolInput, images } = this.props;
+    const { label, resultText, toolName, toolInput, images, workflow } = this.props;
     const tmAvatar = this.props.isTeammate ? getTeammateAvatar(label) : null;
     return (
       <div className={styles.messageRow}>
@@ -1571,7 +1571,7 @@ class ChatMessage extends React.Component {
         <div className={styles.contentCol}>
           {this.renderLabel(label)}
           <div className={styles.bubbleSubAgent}>
-            <ToolResultView toolName={toolName} toolInput={toolInput} resultText={resultText} images={images} />
+            <ToolResultView toolName={toolName} toolInput={toolInput} resultText={resultText} images={images} workflow={workflow} />
           </div>
         </div>
       </div>

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- feat(workflow): 聊天里内联渲染 Workflow 工具的「工作流面板」——phases 左列 + 按阶段分组的 agents 行（label / model / 状态 / token / 工具数 / 耗时），数据源为落盘的 workflow run journal（`<sessionDir>/workflows/<runId>.json`）
+- feat(workflow): 实时跟随——服务端 server/lib/workflow-watcher.js 监视 workflows 目录（复用 log-watcher 的 dir fs.watch + 防抖 + 安全网慢轮询 + 测试缝），journal 覆写经 SSE `workflow_update` 推送，前端 src/utils/workflowStore.js 按 runId 分发，面板随工作流进度实时刷新
+- feat(workflow): runId 出口补全——server/lib/enrich-workflow.js 仿 enrich-plan-input，在出 SSE/REST 前给 Workflow tool_result 注入 `_ccvWorkflow={runId,taskId,sessionId}`（runId 经 session-transcript-reader 新增的 lookupToolUseResult 按 tool_use.id 反查 CC transcript 顶层 toolUseResult）
+- feat(workflow): 新增只读路由 `GET /api/workflow-journal`（按 runId/taskId 定位、归一化面板模型、路径穿越守卫 + 惰性 arm watch）
+- test: 新增 server 单测覆盖 lookupToolUseResult / enrich-workflow / workflow-journal / workflow-watcher
+
 ## 1.6.302 (2026-06-07)
 
 - fix(win): PTY→WS 洪泛限流器（server/lib/pty-flood-coalescer.js）——字节率超阈值合并 + last-wins 截断（速率上限 ≈1.9MB/s，DEC 2026 配平，CCV_FLOOD_* 可调参），根治切主题/大流量场景 ConPTY 重绘洪泛卡死客户端

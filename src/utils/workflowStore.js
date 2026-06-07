@@ -1,0 +1,54 @@
+/**
+ * Workflow live store
+ *
+ * 轻量模块级发布订阅，承接服务端 SSE `workflow_update` 事件，按 runId（及 taskId 别名）
+ * 分发给对应的 WorkflowPanel。避免 AppBase→ChatView→ChatMessage→ToolResultView→Panel
+ * 深层 prop 穿线。
+ *
+ * - publish(payload): AppBase 收到 workflow_update 时调用，payload = { runId, taskId, data, ... }。
+ * - subscribe(key, cb): WorkflowPanel 按自身 runId 或 taskId 订阅，返回退订函数。
+ * - getLatest(key): 取已缓存的最新 journal（panel 挂载时若已先到事件可即时用）。
+ */
+
+const _subs = new Map();    // key(runId|taskId) → Set<cb>
+const _latest = new Map();  // key → normalized journal data
+
+function _emit(key, data) {
+  const set = _subs.get(key);
+  if (!set) return;
+  for (const cb of set) {
+    try { cb(data); } catch {}
+  }
+}
+
+export function publish(payload) {
+  if (!payload || typeof payload !== 'object') return;
+  const data = payload.data;
+  if (!data || typeof data !== 'object') return;
+  const keys = [];
+  if (payload.runId) keys.push(payload.runId);
+  if (data.runId && data.runId !== payload.runId) keys.push(data.runId);
+  if (payload.taskId) keys.push(payload.taskId);
+  if (data.taskId && data.taskId !== payload.taskId) keys.push(data.taskId);
+  for (const k of keys) {
+    _latest.set(k, data);
+    _emit(k, data);
+  }
+}
+
+export function subscribe(key, cb) {
+  if (!key || typeof cb !== 'function') return () => {};
+  let set = _subs.get(key);
+  if (!set) { set = new Set(); _subs.set(key, set); }
+  set.add(cb);
+  return () => {
+    const s = _subs.get(key);
+    if (!s) return;
+    s.delete(cb);
+    if (s.size === 0) _subs.delete(key);
+  };
+}
+
+export function getLatest(key) {
+  return key ? (_latest.get(key) || null) : null;
+}
